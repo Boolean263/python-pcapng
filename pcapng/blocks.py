@@ -14,7 +14,7 @@ import io
 import itertools
 
 from pcapng.structs import (
-    struct_decode, RawBytes, IntField, OptionsField, PacketDataField,
+    struct_decode, struct_encode, write_bytes_padded, write_int, RawBytes, IntField, OptionsField, PacketDataField,
     ListField, NameResolutionRecordField, SimplePacketDataField)
 from pcapng.constants import link_types
 from pcapng.utils import unpack_timestamp_resolution
@@ -28,7 +28,7 @@ class Block(object):
 
     schema = []
 
-    def __init__(self, raw):
+    def __init__(self, raw=None):
         self._raw = raw
         self._decoded = None
 
@@ -40,13 +40,41 @@ class Block(object):
         return struct_decode(self.schema, io.BytesIO(self._raw),
                              endianness=self.section.endianness)
 
+    def encode(self, outstream):
+        encoded_block = io.BytesIO()
+        self._encode(encoded_block)
+        encoded_block = encoded_block.getvalue()
+        subblock_length = len(encoded_block)
+        block_length = 12 + subblock_length
+        if subblock_length % 4 != 0:
+            block_length += (4 - (subblock_length % 4))
+        write_int(self.magic_number, outstream, 32)
+        write_int(block_length, outstream, 32)
+        write_bytes_padded(outstream, encoded_block)
+        write_int(block_length, outstream, 32)
+
+    def _encode(self, outstream):
+        struct_encode(self.schema, self, outstream, endianness=self.section.endianness)
+
     def __getattr__(self, name):
+        if not any([name == key for key, value in self.schema]):
+            return self.__dict__[name]
         if self._decoded is None:
             self._decoded = self._decode()
         try:
             return self._decoded[name]
         except KeyError:
             raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        if not any([name == key for key, value in self.schema]):
+            self.__dict__[name] = value
+            return
+        if "_decoded" not in self.__dict__ or self.__dict__["_decoded"] is None:
+            self._decoded = {}
+            for key, packed_type in self.schema:
+                self._decoded[key] = None
+        self._decoded[name] = value
 
     def __repr__(self):
         args = []
@@ -90,7 +118,7 @@ class SectionHeader(Block):
             (4, 'shb_userappl', 'string'),
         ]))]
 
-    def __init__(self, raw, endianness):
+    def __init__(self, raw=None, endianness="<"):
         self._raw = raw
         self._decoded = None
         self.endianness = endianness
@@ -101,6 +129,10 @@ class SectionHeader(Block):
     def _decode(self):
         return struct_decode(self.schema, io.BytesIO(self._raw),
                              endianness=self.endianness)
+
+    def _encode(self, outstream):
+        write_int(0x1A2B3C4D, outstream, 32)
+        struct_encode(self.schema, self, outstream, endianness=self.endianness)
 
     def register_interface(self, interface):
         """Helper method to register an interface within this section"""
