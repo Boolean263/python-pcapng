@@ -105,6 +105,12 @@ with open(filename, "r") as file_in:
                         output_urb(total_microseconds, urb, out)
                         data = bytearray()
                         urb = usbmon.Packet()
+                elif packet_type == "STALL packet":
+                    data = bytearray()
+                    urb = usbmon.Packet()
+                elif packet_type == "NAK packet":
+                    # Data is retransmitted so drop it.
+                    data = bytearray()
                 else:
                     raise RuntimeError("unsupported packet type {}".format(packet_type))
             if row[0] == "# Level":
