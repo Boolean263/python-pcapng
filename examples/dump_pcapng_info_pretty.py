@@ -5,6 +5,7 @@ from __future__ import print_function
 import sys
 import io
 from datetime import datetime
+import six
 
 import pcapng
 from pcapng.blocks import SectionHeader, InterfaceDescription, EnhancedPacket
@@ -19,21 +20,21 @@ def col256(text, fg=None, bg=None, bold=False):
         return u'8;5;{0:d}'.format(_to_color(col))
 
     def _to_color(num):
-        if isinstance(num, (int, long)):
+        if isinstance(num, six.integer_types):
             return num  # Assume it is already a color
 
-        if isinstance(num, basestring) and len(num) <= 3:
+        if isinstance(num, six.string_types) and len(num) <= 3:
             return 16 + int(num, 6)
 
         raise ValueError("Invalid color: {0!r}".format(num))
 
-    if not isinstance(text, basestring):
+    if not isinstance(text, six.string_types):
         text = repr(text)
 
-    if not isinstance(text, unicode):
-        text = unicode(text, encoding='utf-8')
+    if not isinstance(text, six.text_type):
+        text = six.u(text, encoding='utf-8')
 
-    buf = io.StringIO()
+    buf = six.StringIO()
 
     if bold:
         buf.write(u'\x1b[1m')
@@ -67,7 +68,7 @@ def pprint_options(options):
         for key, values in options.iter_all_items():
             for value in values:
                 yield col256(key + ':', bold=True, fg='453')
-                yield col256(unicode(value), fg='340')
+                yield col256(six.u(value), fg='340')
 
 
 def pprint_sectionheader(block):
@@ -105,10 +106,10 @@ def pprint_interfacedesc(block):
         col256(' Interface #{0} '.format(block.interface_id),
                bg='010', fg='453'),
         col256('Link type:', bold=True),
-        col256(unicode(block.link_type), fg='140'),
+        col256(six.u(block.link_type), fg='140'),
         col256(block.link_type_description, fg='145'),
         col256('Snap length:', bold=True),
-        col256(unicode(block.snaplen), fg='145'),
+        col256(six.u(block.snaplen), fg='145'),
     ]
     text.extend(pprint_options(block.options))
     print(' '.join(text))
@@ -117,23 +118,26 @@ def pprint_interfacedesc(block):
 def pprint_enhanced_packet(block):
     text = [
         col256(' Packet+ ', bg='001', fg='345'),
-
-        # col256('NIC:', bold=True),
-        # col256(unicode(block.interface_id), fg='145'),
-        col256(unicode(block.interface.options['if_name']), fg='140'),
-
-        col256(unicode(datetime.utcfromtimestamp(block.timestamp)
-                       .strftime('%Y-%m-%d %H:%M:%S')), fg='455'),
     ]
+    try:
+        text.extend([
+            col256('NIC:', bold=True),
+            col256(six.u(block.interface_id), fg='145'),
+            col256(six.u(block.interface.options['if_name']), fg='140'),
+        ])
+    except KeyError:
+        pass
 
     text.extend([
+        col256(six.u(datetime.utcfromtimestamp(block.timestamp)
+                       .strftime('%Y-%m-%d %H:%M:%S')), fg='455'),
         # col256('Size:', bold=True),
-        col256(unicode(block.packet_len) + u' bytes', fg='025')])
+        col256(str(block.packet_len) + u' bytes', fg='025')])
 
     if block.captured_len != block.packet_len:
         text.extend([
             col256('Truncated to:', bold=True),
-            col256(unicode(block.captured_len) + u'bytes', fg='145')])
+            col256(str(block.captured_len) + u' bytes', fg='145')])
 
     text.extend(pprint_options(block.options))
     print(' '.join(text))
@@ -198,7 +202,7 @@ def format_scapy_packet(packet):
 
 
 def make_printable(data):  # todo: preserve unicode
-    stream = io.BytesIO(data)
+    stream = six.StringIO()
     for ch in data:
         if ch == '\\':
             stream.write('\\\\')
@@ -210,7 +214,7 @@ def make_printable(data):  # todo: preserve unicode
 
 
 def format_binary_data(data):
-    stream = io.BytesIO(data)
+    stream = six.BytesIO(data)
     row_offset = 0
     row_size = 16  # bytes
 
@@ -219,8 +223,8 @@ def format_binary_data(data):
         if not data:
             return
 
-        hexrow = io.BytesIO()
-        asciirow = io.BytesIO()
+        hexrow = six.BytesIO()
+        asciirow = six.BytesIO()
         for i, byte in enumerate(data):
             if 32 <= ord(byte) <= 126:
                 asciirow.write(byte)
