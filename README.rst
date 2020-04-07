@@ -141,27 +141,32 @@ Hacking
 
 Format specification is here:
 
-http://www.winpcap.org/ntar/draft/PCAP-DumpFileFormat.html
+https://xml2rfc.tools.ietf.org/cgi-bin/xml2rfc.cgi?url=https://raw.githubusercontent.com/pcapng/pcapng/master/draft-tuexen-opsawg-pcapng.xml&modeAsFormat=html/ascii&type=ascii#rfc.section.4.3
 
 Contributions are welcome, please contact me if you're planning to do
 some big change, so that we can sort out the best way to integrate it.
 
-Or even better, open an issue so the whole world can partecipate in
+Or even better, open an issue so the whole world can participate in
 the discussion :)
 
 
 Pcap-ng write support
 =====================
 
-Support for writing pcap-ng files is "planned"; that means: I have
-some ideas on how to write that part and which would be the required
-changes to the library.
+The original author (rshk) had some ideas on how to add write support
+but never added it because they didn't need it. There is discussion on
+the topic here:
 
-I didn't add that part (yet) as I currently don't need it, and I'm
-wondering whether anybody might (possible use cases are if you're
-writing some packet capture tool in Python, or some other kind of
-capture-file manipulation thing).
+https://github.com/rshk/python-pcapng/issues/14
 
-If you need this feature, I'd like to hear from you (otherwise, I
-don't really think I'm going to invest much time in something that no
-one needs..).
+The repository you're currently looking at (Boolean263/python-pcapng)
+took the changes from @tannewt's patch in those comments as a starting
+point, and I'm working from that to add full write support.
+
+Current status on that front:
+
+* Able to add options to a block and write them out
+  - Only adding strings (specifically ``opt_comment``) is tested so far
+  - Other options and option types need testing
+* Able to read a pcapng file and write out a new file and have the new
+  file work

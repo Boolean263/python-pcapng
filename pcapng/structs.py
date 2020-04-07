@@ -17,6 +17,7 @@ import six
 from pcapng.exceptions import (
     BadMagic, CorruptedFile, StreamEmpty, TruncatedFile)
 from pcapng.utils import (
+    pack_euiaddr, pack_ipv4, pack_ipv6, pack_macaddr,
     unpack_euiaddr, unpack_ipv4, unpack_ipv6, unpack_macaddr)
 
 SECTION_HEADER_MAGIC = 0x0a0d0d0a
@@ -502,10 +503,11 @@ def write_options(stream, options):
     """
 
     for key in options:
-        value = options[value]
-        write_int(key, stream, 16, False, options.endianness)
-        write_int(len(value), stream, 16, False, options.endianness)
-        write_bytes_padded(stream, data)
+        code = options._field_names[key]
+        for value in options.get_all_raw(key):
+            write_int(code, stream, 16, False, options.endianness)
+            write_int(len(value), stream, 16, False, options.endianness)
+            write_bytes_padded(stream, value)
     write_int(0, stream, 16, False, options.endianness)
 
 class Options(Mapping):
@@ -570,7 +572,7 @@ class Options(Mapping):
     # -------------------- Nice interface :) --------------------
 
     def __getitem__(self, name):
-        return self._get_converted(name)
+        return self._get_decoded(name)
 
     def __len__(self):
         return len(self.raw_data)
@@ -581,7 +583,7 @@ class Options(Mapping):
 
     def get_all(self, name):
         """Get all values for the given option"""
-        return self._get_all_converted(name)
+        return self._get_all_decoded(name)
 
     def get_raw(self, name):
         """Get raw value for the given option"""
@@ -598,6 +600,13 @@ class Options(Mapping):
         """
         for key in self:
             yield key, self.get_all(key)
+
+    def add(self, name, value):
+        """Add a value to the given-named option"""
+        code = self._resolve_name(name)
+        ftype = self.schema[code]["ftype"]
+        value = self._encode_value(value, ftype)
+        self._update_data([(code, value)])
 
     def __repr__(self):
         args = dict(self.iter_all_items())
@@ -653,28 +662,28 @@ class Options(Mapping):
         except KeyError:
             raise KeyError(name)
 
-    def _get_converted(self, name):
+    def _get_decoded(self, name):
         value = self._get_raw(name)
-        return self._convert(name, value)
+        return self._decode(name, value)
 
-    def _get_all_converted(self, name):
+    def _get_all_decoded(self, name):
         value = self._get_all_raw(name)
-        return self._convert_all(name, value)
+        return self._decode_all(name, value)
 
-    def _convert(self, code, value):
+    def _decode(self, code, value):
         code = self._resolve_name(code)
         if code in self.schema:
-            return self._convert_value(value, self.schema[code]['ftype'])
+            return self._decode_value(value, self.schema[code]['ftype'])
         return value
 
-    def _convert_all(self, code, values):
+    def _decode_all(self, code, values):
         code = self._resolve_name(code)
         if code in self.schema:
-            return [self._convert_value(value, self.schema[code]['ftype'])
+            return [self._decode_value(value, self.schema[code]['ftype'])
                     for value in values]
         return values
 
-    def _convert_value(self, value, ftype):
+    def _decode_value(self, value, ftype):
         assert isinstance(value, six.binary_type)
 
         if ftype is None:
@@ -730,6 +739,62 @@ class Options(Mapping):
 
         raise ValueError('Unsupported field type: {0}'.format(ftype))
 
+    def _encode_value(self, value, ftype):
+
+        if ftype is None:
+            warnings.warn(DeprecationWarning(
+                'Field type should not be "None". Please explicitly '
+                'use TYPE_BYTES instead.'))
+            assert isinstance(value, six.binary_type)
+            return value
+
+        if ftype == TYPE_BYTES:
+            assert isinstance(value, six.binary_type)
+            return value
+
+        if hasattr(ftype, '__call__'):
+            #TODO figure out how callable options work
+            return ftype(value, self.endianness)
+
+        if ftype == TYPE_STRING:
+            return value.encode('utf-8')
+
+        if ftype in ('str', 'unicode'):
+            warnings.warn(DeprecationWarning(
+                'The "{ftype}" field type is deprecated. Please use "string" '
+                '(TYPE_STRING) instead.'
+                .format(ftype=ftype)))
+            return value.encode('utf-8')
+
+        _numeric_types = {
+            TYPE_U8: 'B', TYPE_I8: 'b',
+            TYPE_U16: 'H', TYPE_I16: 'h',
+            TYPE_U32: 'I', TYPE_I32: 'i',
+            TYPE_U64: 'Q', TYPE_I64: 'q',
+        }
+        if ftype in _numeric_types:
+            fmt = self.endianness + _numeric_types[ftype]
+            return struct.pack(fmt, value)
+
+        if ftype == TYPE_IPV4:
+            return pack_ipv4(value)
+
+        if ftype == TYPE_IPV4_MASK:
+            return pack_ipv4(value[0])+pack_ipv4(value[1])
+
+        if ftype == TYPE_IPV6:
+            return pack_ipv6(value)
+
+        if ftype == TYPE_IPV6_PREFIX:
+            return pack_ipv6(value[0]) + value[1]
+
+        if ftype == TYPE_MACADDR:
+            return pack_macaddr(value)
+
+        if ftype == TYPE_EUIADDR:
+            return pack_euiaddr(value)
+
+        raise ValueError('Unsupported field type: {0}'.format(ftype))
 
 def struct_decode(schema, stream, endianness='='):
     """

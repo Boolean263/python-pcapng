@@ -5,6 +5,9 @@ import six
 from six import byte2int
 
 
+def pack_ipv4(data):
+    return socket.inet_aton(data)
+
 def unpack_ipv4(data):
     return socket.inet_ntoa(six.b(data))
 
@@ -24,6 +27,8 @@ def _get_pairs(data):
     """
     return list(zip(*((iter(data),)*2)))
 
+def pack_ipv6(data):
+    return socket.inet_pton(socket.AF_INET6, data)
 
 def unpack_ipv6(data):
     data = six.b(data)
@@ -31,11 +36,17 @@ def unpack_ipv6(data):
         '{0:02x}{1:02x}'.format(x, y)
         for (x, y) in _get_pairs(six.iterbytes(data)))
 
+def pack_macaddr(data):
+    a = [int(x, 16) for x in data.split(':')]
+    return struct.pack('!6B', *a)
 
 def unpack_macaddr(data):
     data = six.b(data)
     return ':'.join(format(x, '02x') for x in six.iterbytes(data))
 
+
+def pack_euiaddr(data):
+    return pack_macaddr(data)
 
 def unpack_euiaddr(data):
     return unpack_macaddr(data)
