@@ -73,6 +73,28 @@ def read_int(stream, size, signed=False, endianness='='):
     data = read_bytes(stream, size_bytes)
     return struct.unpack(fmt, data)[0]
 
+def write_int(number, stream, size, signed=False, endianness='='):
+    """
+    Write (and encode) an integer number to a binary stream.
+
+    :param number: the integer number to write
+    :param stream: an object providing a ``write()`` method
+    :param size: the size, in bits, of the number to be read.
+        Supported sizes are: 8, 16, 32 and 64 bits.
+    :param signed: Whether a signed or unsigned number is required.
+        Defaults to ``False`` (unsigned int).
+    :param endianness: specify the endianness to use to decode the number,
+        in the same format used by Python :py:mod:`struct` module.
+        Defaults to '=' (native endianness). '!' means "network" endianness
+        (big endian), '<' little endian, '>' big endian.
+
+    """
+    fmt = INT_FORMATS.get(size)
+    fmt = fmt.lower() if signed else fmt.upper()
+    assert endianness in '<>!='
+    fmt = endianness + fmt
+    size_bytes = size // 8
+    write_bytes(stream, struct.pack(fmt, number))
 
 def read_section_header(stream):
     """
@@ -173,6 +195,16 @@ def read_bytes(stream, size):
                             .format(size, len(data)))
     return data
 
+def write_bytes(stream, data):
+    """
+    Read the given amount of raw bytes from a stream.
+
+    :param stream: the stream from which to read data
+    :param size: the size to read, in bytes
+    :param data: the data to write
+    """
+    stream.write(data)
+
 
 def read_bytes_padded(stream, size, pad_block_size=4):
     """
@@ -197,6 +229,24 @@ def read_bytes_padded(stream, size, pad_block_size=4):
         read_bytes(stream, padding)
     return data
 
+def write_bytes_padded(stream, data, pad_block_size=4):
+    """
+    Read the given amount of bytes from a stream, plus read and discard
+    any necessary extra byte to align up to the pad_block_size-sized
+    next block.
+
+    :param stream: the stream from which to read data
+    :param size: the size to read, in bytes
+    :returns: the read data
+    :raises: :py:exc:`~pcapng.exceptions.StreamEmpty` if zero bytes were read
+    :raises: :py:exc:`~pcapng.exceptions.TruncatedFile` if 0 < bytes < size
+        were read
+    """
+
+    write_bytes(stream, data)
+    padding = (pad_block_size - (len(data) % pad_block_size)) % pad_block_size
+    if padding > 0:
+        write_bytes(stream, bytes([0] * padding))
 
 class StructField(object):
     """Abstract base class for struct fields"""
@@ -227,6 +277,9 @@ class RawBytes(StructField):
     def load(self, stream, endianness):
         return read_bytes(stream, self.size)
 
+    def encode(self, value, stream, endianness):
+        write_bytes_padded(stream, value, self.size)
+
     def __repr__(self):
         return ('{0}(size={1!r})'.format(self.__class__.__name__, self.size))
 
@@ -250,6 +303,10 @@ class IntField(StructField):
                           endianness=endianness)
         return number
 
+    def encode(self, number, stream, endianness):
+        write_int(number, stream, self.size, signed=self.signed,
+            endianness=endianness)
+
     def __repr__(self):
         return ('{0}(size={1!r}, signed={2!r})'
                 .format(self.__class__.__name__, self.size, self.signed))
@@ -271,6 +328,9 @@ class OptionsField(StructField):
         options = read_options(stream, endianness)
         return Options(schema=self.options_schema, data=options,
                        endianness=endianness)
+
+    def encode(self, options, stream, endianness):
+        write_options(stream, options)
 
     def __repr__(self):
         return ('{0}({1!r})'
@@ -295,6 +355,12 @@ class PacketDataField(StructField):
         packet_data = read_bytes_padded(stream, captured_len)
         return captured_len, packet_len, packet_data
 
+    def encode(self, packet, stream, endianness):
+        if not packet:
+            raise ValueError("Packet invalid")
+        write_int(packet[0], stream, 32, False, endianness)
+        write_int(packet[1], stream, 32, False, endianness)
+        write_bytes_padded(stream, packet[2])
 
 class SimplePacketDataField(StructField):
     """
@@ -424,6 +490,23 @@ def read_options(stream, endianness):
 
     return list(_iter_read_options(stream, endianness))
 
+def write_options(stream, options):
+    """
+    Each option is composed by:
+
+    - option_code (uint16)
+    - value_length (uint16)
+    - value (value_length-sized binary data)
+
+    The end marker is simply an option with code ``0x0000`` and no payload
+    """
+
+    for key in options:
+        value = options[value]
+        write_int(key, stream, 16, False, options.endianness)
+        write_int(len(value), stream, 16, False, options.endianness)
+        write_bytes_padded(stream, data)
+    write_int(0, stream, 16, False, options.endianness)
 
 class Options(Mapping):
     """
@@ -681,7 +764,8 @@ def struct_encode(schema, obj, outstream, endianness='='):
     In the future, this function will be used to encode a structure into
     a stream. For the moment, it just raises :py:exc:`NotImplementedError`.
     """
-    raise NotImplementedError
+    for name, field in schema:
+        field.encode(getattr(obj, name), outstream, endianness=endianness)
 
 
 def struct_decode_string(schema, data):
