@@ -46,7 +46,8 @@ def unpack_macaddr(data):
 
 
 def pack_euiaddr(data):
-    return pack_macaddr(data)
+    a = [int(x, 16) for x in data.split(':')]
+    return struct.pack('!8B', *a)
 
 def unpack_euiaddr(data):
     return unpack_macaddr(data)
