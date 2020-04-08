@@ -6,6 +6,7 @@ import abc
 import io
 import struct
 import warnings
+import socket
 
 try:
     from collections.abc import Mapping
@@ -50,6 +51,10 @@ TYPE_I16 = 'i16'
 TYPE_I32 = 'i32'
 TYPE_I64 = 'i64'
 
+NRB_RECORD_END = 0
+NRB_RECORD_IPv4 = 1
+NRB_RECORD_IPv6 = 2
+
 
 def read_int(stream, size, signed=False, endianness='='):
     """
@@ -80,11 +85,11 @@ def write_int(number, stream, size, signed=False, endianness='='):
 
     :param number: the integer number to write
     :param stream: an object providing a ``write()`` method
-    :param size: the size, in bits, of the number to be read.
+    :param size: the size, in bits, of the number to be written.
         Supported sizes are: 8, 16, 32 and 64 bits.
     :param signed: Whether a signed or unsigned number is required.
         Defaults to ``False`` (unsigned int).
-    :param endianness: specify the endianness to use to decode the number,
+    :param endianness: specify the endianness to use to encode the number,
         in the same format used by Python :py:mod:`struct` module.
         Defaults to '=' (native endianness). '!' means "network" endianness
         (big endian), '<' little endian, '>' big endian.
@@ -409,6 +414,11 @@ class ListField(StructField):
             except StreamEmpty:
                 return
 
+    def encode(self, list_data, stream, endianness):
+        for rec in list_data:
+            self.subfield.encode(rec, stream, endianness)
+        self.subfield.encode_finish(stream, endianness)
+
     def __repr__(self):
         return ('{0}({1!r})'.format(self.__class__.__name__, self.subfield))
 
@@ -438,27 +448,52 @@ class NameResolutionRecordField(StructField):
         record_type = read_int(stream, 16, False, endianness)
         record_length = read_int(stream, 16, False, endianness)
 
-        if record_type == 0:
+        if record_type == NRB_RECORD_END:
             raise StreamEmpty('End marker reached')
 
         data = read_bytes_padded(stream, record_length)
 
-        if record_type == 1:  # IPv4
+        if record_type == NRB_RECORD_IPv4:
             return {
                 'type': record_type,
-                'address': data[:4],
-                'name': data[4:],
+                'address': socket.inet_ntop(socket.AF_INET, data[:4]),
+                'names': [ x.decode() for x in data[4:-1].split(b"\x00") ],
             }
 
-        if record_type == 2:  # IPv6
+        if record_type == NRB_RECORD_IPv6:
             return {
                 'type': record_type,
-                'address': data[:16],
-                'name': data[16:],
+                'address': socket.inet_ntop(socket.AF_INET6, data[:16]),
+                'names': [ x.decode() for x in data[16:-1].split(b"\x00") ],
             }
 
         return {'type': record_type, 'raw': data}
 
+    def encode(self, d, stream, endianness):
+        write_int(d['type'], stream, 16, endianness=endianness)
+
+        if d['type'] == NRB_RECORD_END:
+            write_int(0, stream, 16, endianness=endianness)
+
+        elif d['type'] == NRB_RECORD_IPv4:
+            raw = socket.inet_pton(socket.AF_INET, d['address'])
+            raw += (b"\x00".join([ s.encode() for s in d['names'] ]))+b"\x00"
+            write_int(len(raw), stream, 16, endianness=endianness)
+            write_bytes_padded(stream, raw)
+
+        elif d['type'] == NRB_RECORD_IPv6:
+            raw = socket.inet_pton(socket.AF_INET6, d['address'])
+            raw += (b'\x00'.join([ s.encode() for s in d['names'] ]))+b"\x00"
+            write_int(len(raw), stream, 16, endianness=endianness)
+            write_bytes_padded(stream, raw)
+
+        else:
+            write_int(len(d['raw']), stream, 16, endianness=endianness)
+            write_bytes_padded(stream, d['raw'])
+
+    def encode_finish(self, stream, endianness):
+        write_int(NRB_RECORD_END, stream, 16, endianness=endianness)
+        write_int(0, stream, 16, endianness=endianness)
 
 def read_options(stream, endianness):
     """
