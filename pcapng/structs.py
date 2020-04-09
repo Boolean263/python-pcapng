@@ -41,6 +41,7 @@ TYPE_IPV6 = 'ipv6'
 TYPE_IPV6_PREFIX = 'ipv6+prefix'
 TYPE_MACADDR = 'macaddr'
 TYPE_EUIADDR = 'euiaddr'
+TYPE_TYPE_BYTES = 'type+bytes'
 
 TYPE_U8 = 'u8'  # Unsigned integer, 8 bits
 TYPE_U16 = 'u16'
@@ -50,6 +51,13 @@ TYPE_I8 = 'i8'  # Signed integer, 8 bits
 TYPE_I16 = 'i16'
 TYPE_I32 = 'i32'
 TYPE_I64 = 'i64'
+
+_numeric_types = {
+        TYPE_U8: 'B', TYPE_I8: 'b',
+        TYPE_U16: 'H', TYPE_I16: 'h',
+        TYPE_U32: 'I', TYPE_I32: 'i',
+        TYPE_U64: 'Q', TYPE_I64: 'q',
+}
 
 NRB_RECORD_END = 0
 NRB_RECORD_IPv4 = 1
@@ -268,6 +276,9 @@ class StructField(object):
 
     def __unicode__(self):
         return self.__repr__().encode('UTF-8')
+
+    def encode_finish(self, stream, endianness):
+        pass
 
 
 class RawBytes(StructField):
@@ -582,6 +593,8 @@ class Options(Mapping):
         - ``ipv6+prefix``: an ipv6 address followed by prefix length [17 bytes]
         - ``macaddr``: a mac address [6 bytes]
         - ``euiaddr``: a eui address [8 bytes]
+        - ``type+bytes``: field where the first byte is a type, and
+          the remainder is bytes
 
     :param data:
         Initial data for the options. A list of two-tuples: ``(code, value)``.
@@ -749,12 +762,6 @@ class Options(Mapping):
                 .format(ftype=ftype)))
             return six.u(value)
 
-        _numeric_types = {
-            TYPE_U8: 'B', TYPE_I8: 'b',
-            TYPE_U16: 'H', TYPE_I16: 'h',
-            TYPE_U32: 'I', TYPE_I32: 'i',
-            TYPE_U64: 'Q', TYPE_I64: 'q',
-        }
         if ftype in _numeric_types:
             fmt = self.endianness + _numeric_types[ftype]
             return struct.unpack(fmt, value)[0]
@@ -777,6 +784,9 @@ class Options(Mapping):
 
         if ftype == TYPE_EUIADDR:
             return unpack_euiaddr(value)
+
+        if ftype == TYPE_TYPE_BYTES:
+            return (value[0], value[1:])
 
         raise ValueError('Unsupported field type: {0}'.format(ftype))
 
@@ -807,12 +817,6 @@ class Options(Mapping):
                 .format(ftype=ftype)))
             return value.encode('utf-8')
 
-        _numeric_types = {
-            TYPE_U8: 'B', TYPE_I8: 'b',
-            TYPE_U16: 'H', TYPE_I16: 'h',
-            TYPE_U32: 'I', TYPE_I32: 'i',
-            TYPE_U64: 'Q', TYPE_I64: 'q',
-        }
         if ftype in _numeric_types:
             fmt = self.endianness + _numeric_types[ftype]
             return struct.pack(fmt, value)
@@ -834,6 +838,9 @@ class Options(Mapping):
 
         if ftype == TYPE_EUIADDR:
             return pack_euiaddr(value)
+
+        if ftype == TYPE_TYPE_BYTES:
+            return value[0]+value[1]
 
         raise ValueError('Unsupported field type: {0}'.format(ftype))
 
@@ -867,8 +874,7 @@ def struct_decode(schema, stream, endianness='='):
 
 def struct_encode(schema, obj, outstream, endianness='='):
     """
-    In the future, this function will be used to encode a structure into
-    a stream. For the moment, it just raises :py:exc:`NotImplementedError`.
+    Encode structured data to a stream.
     """
     for name, field in schema:
         field.encode(getattr(obj, name), outstream, endianness=endianness)

@@ -183,7 +183,7 @@ class InterfaceDescription(SectionMemberBlock):
             (8, 'if_speed', 'u64'),
             (9, 'if_tsresol'),  # Just keep the raw data
             (10, 'if_tzone', 'u32'),
-            (11, 'if_filter', 'string'),
+            (11, 'if_filter', 'type+bytes'),
             (12, 'if_os', 'string'),
             (13, 'if_fcslen', 'u8'),
             (14, 'if_tsoffset', 'i64'),
@@ -266,8 +266,8 @@ class EnhancedPacket(BasePacketBlock):
         ('timestamp_low', IntField(32, False)),
         ('packet_payload_info', PacketDataField()),
         ('options', OptionsField([
-            (2, 'epb_flags'),  # todo: is this endianness dependent?
-            (3, 'epb_hash'),  # todo: process the hash value
+            (2, 'epb_flags', 'u32'),
+            (3, 'epb_hash', 'type+bytes'),  # todo: process the hash value
             (4, 'epb_dropcount', 'u64'),
         ]))
     ]
