@@ -383,6 +383,12 @@ class SimplePacketDataField(StructField):
         packet_data = read_bytes_padded(stream, packet_len)
         return packet_len, packet_data
 
+    def encode(self, packet, stream, endianness):
+        if not packet:
+            raise ValueError("Packet invalid")
+        write_int(packet[0], stream, 32, False, endianness)
+        write_bytes_padded(stream, packet[1])
+
 
 class ListField(StructField):
     """
