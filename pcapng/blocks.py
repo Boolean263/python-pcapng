@@ -133,7 +133,7 @@ class SectionHeader(Block):
                              endianness=self.endianness)
 
     def _encode(self, outstream):
-        write_int(0x1A2B3C4D, outstream, 32)
+        write_int(0x1A2B3C4D, outstream, 32, endianness=self.endianness)
         struct_encode(self.schema, self, outstream, endianness=self.endianness)
 
     def register_interface(self, interface):
