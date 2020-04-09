@@ -13,6 +13,8 @@ better access to decoded information, ...
 import io
 import itertools
 
+import six
+
 from pcapng.structs import (
     struct_decode, struct_encode, write_bytes_padded, write_int, RawBytes, IntField, OptionsField, PacketDataField,
     ListField, NameResolutionRecordField, SimplePacketDataField)
@@ -37,11 +39,11 @@ class Block(object):
         return cls(raw)  # no context needed by default
 
     def _decode(self):
-        return struct_decode(self.schema, io.BytesIO(self._raw),
+        return struct_decode(self.schema, six.BytesIO(self._raw),
                              endianness=self.section.endianness)
 
     def encode(self, outstream):
-        encoded_block = io.BytesIO()
+        encoded_block = six.BytesIO()
         self._encode(encoded_block)
         encoded_block = encoded_block.getvalue()
         subblock_length = len(encoded_block)
@@ -127,7 +129,7 @@ class SectionHeader(Block):
         self.interface_stats = {}
 
     def _decode(self):
-        return struct_decode(self.schema, io.BytesIO(self._raw),
+        return struct_decode(self.schema, six.BytesIO(self._raw),
                              endianness=self.endianness)
 
     def _encode(self, outstream):
