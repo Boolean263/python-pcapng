@@ -637,12 +637,16 @@ class Options(Mapping):
 
     def __setitem__(self, name, value):
         code = self._resolve_name(name)
+        if code == 0:
+            raise KeyError(name)
         ftype = self.schema[code]["ftype"]
         value = self._encode_value(value, ftype)
         self.raw_data[code] = [ value ]
 
     def __delitem__(self, name):
         code = self._resolve_name(name)
+        if code == 0:
+            raise KeyError(name)
         try:
             del self.raw_data[name]
         except KeyError:
@@ -671,6 +675,8 @@ class Options(Mapping):
     def add(self, name, value):
         """Add a value to the given-named option"""
         code = self._resolve_name(name)
+        if code == 0:
+            raise KeyError(name)
         ftype = self.schema[code]["ftype"]
         value = self._encode_value(value, ftype)
         self._update_data([(code, value)])
@@ -717,6 +723,8 @@ class Options(Mapping):
 
     def _get_raw(self, name):
         _name = self._resolve_name(name)
+        if _name == 0:
+            raise KeyError(name)
         try:
             return self.raw_data[_name][0]
         except KeyError:
@@ -724,6 +732,8 @@ class Options(Mapping):
 
     def _get_all_raw(self, name):
         _name = self._resolve_name(name)
+        if _name == 0:
+            raise KeyError(name)
         try:
             return list(self.raw_data[_name])
         except KeyError:
@@ -739,12 +749,16 @@ class Options(Mapping):
 
     def _decode(self, code, value):
         code = self._resolve_name(code)
+        if code == 0:
+            raise KeyError(name)
         if code in self.schema:
             return self._decode_value(value, self.schema[code]['ftype'])
         return value
 
     def _decode_all(self, code, values):
         code = self._resolve_name(code)
+        if code == 0:
+            raise KeyError(name)
         if code in self.schema:
             return [self._decode_value(value, self.schema[code]['ftype'])
                     for value in values]
