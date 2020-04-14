@@ -635,6 +635,19 @@ class Options(Mapping):
         for key in self.raw_data:
             yield self._get_name_alias(key)
 
+    def __setitem__(self, name, value):
+        code = self._resolve_name(name)
+        ftype = self.schema[code]["ftype"]
+        value = self._encode_value(value, ftype)
+        self.raw_data[code] = [ value ]
+
+    def __delitem__(self, name):
+        code = self._resolve_name(name)
+        try:
+            del self.raw_data[name]
+        except KeyError:
+            raise KeyError(name)
+
     def get_all(self, name):
         """Get all values for the given option"""
         return self._get_all_decoded(name)
