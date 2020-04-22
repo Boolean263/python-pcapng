@@ -165,8 +165,12 @@ point, and I'm working from that to add full write support.
 
 Current status on that front:
 
-* Able to add options to a block and write them out
-  - Only adding strings (specifically ``opt_comment``) is tested so far
-  - Other options and option types need testing
 * Able to read a pcapng file and write out a new file and have the new
   file work
+* Able to add options to a block and write them out
+  - Adding strings is reasonably well tested so far
+  - Other options and option types need more testing
+* Write support for NRBs
+  - NRB records return/accept a list of names as per the pcapng spec,
+    even if the list contains only one entry
+* Write support for SPBs
