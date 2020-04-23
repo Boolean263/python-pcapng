@@ -321,6 +321,8 @@ class IntField(StructField):
         return number
 
     def encode(self, number, stream, endianness):
+        if not isinstance(number, int):
+            raise TypeError("'{}' is not numeric".format(number))
         write_int(number, stream, self.size, signed=self.signed,
             endianness=endianness)
 
@@ -876,10 +878,11 @@ def struct_decode(schema, stream, endianness='='):
     Decode structured data from a stream, following a schema.
 
     :param schema:
-        a list of two tuples: ````(name, field)``, where ``name`` is a string
-        representing the attribute name, and ``field`` is an instance of a
-        :py:class:`StructField` sub-class, providing a ``.load()`` method
-        to be called on the stream to get the field value.
+        a list of three tuples: ``(name, field, default)``, where ``name`` is a
+        string representing the attribute name, and ``field`` is an instance of
+        a :py:class:`StructField` sub-class, providing a ``.load()`` method to
+        be called on the stream to get the field value. ``default`` is used
+        when manually instantiating a block, but is ignored here.
 
     :param stream:
         a file-like object, providing a ``.read()`` method, from which data
@@ -894,7 +897,7 @@ def struct_decode(schema, stream, endianness='='):
     """
 
     decoded = {}
-    for name, field in schema:
+    for name, field, default in schema:
         decoded[name] = field.load(stream, endianness=endianness)
     return decoded
 
@@ -903,7 +906,7 @@ def struct_encode(schema, obj, outstream, endianness='='):
     """
     Encode structured data to a stream.
     """
-    for name, field in schema:
+    for name, field, default in schema:
         field.encode(getattr(obj, name), outstream, endianness=endianness)
 
 

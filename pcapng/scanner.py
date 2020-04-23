@@ -86,7 +86,7 @@ class FileScanner(object):
 
         if block_type in blocks.KNOWN_BLOCKS:
             # This is a known block -- instantiate it
-            return blocks.KNOWN_BLOCKS[block_type].from_context(data, self)
+            return self.current_section.new_member(blocks.KNOWN_BLOCKS[block_type], raw=data)
 
         if block_type in BLK_RESERVED_CORRUPTED:
             raise CorruptedFile(

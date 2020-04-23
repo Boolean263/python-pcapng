@@ -12,12 +12,13 @@ better access to decoded information, ...
 
 import io
 import itertools
+import copy
 
 import six
 
 from pcapng.structs import (
     struct_decode, struct_encode, write_bytes_padded, write_int, RawBytes, IntField, OptionsField, PacketDataField,
-    ListField, NameResolutionRecordField, SimplePacketDataField)
+    Options, ListField, NameResolutionRecordField, SimplePacketDataField)
 from pcapng.constants import link_types
 from pcapng.utils import unpack_timestamp_resolution
 
@@ -30,13 +31,23 @@ class Block(object):
 
     schema = []
 
-    def __init__(self, raw=None):
-        self._raw = raw
-        self._decoded = None
-
-    @classmethod
-    def from_context(cls, raw, ctx):
-        return cls(raw)  # no context needed by default
+    def __init__(self, **kwargs):
+        if 'raw' in kwargs:
+            self._raw = kwargs['raw']
+            self._decoded = None
+        else:
+            self._decoded = {}
+            for key, packed_type, default in self.schema:
+                if key == 'options':
+                    self._decoded['options'] = Options(schema=packed_type.options_schema, data={}, endianness='=')
+                else:
+                    self._decoded[key] = copy.deepcopy(default)
+            for key, val in kwargs.items():
+                if key == 'options':
+                    for oky, ovl in val.items():
+                        self.options[oky] = ovl
+                else:
+                    self.__setattr__(key, val)
 
     def _decode(self):
         return struct_decode(self.schema, six.BytesIO(self._raw),
@@ -59,7 +70,7 @@ class Block(object):
         struct_encode(self.schema, self, outstream, endianness=self.section.endianness)
 
     def __getattr__(self, name):
-        if not any([name == key for key, value in self.schema]):
+        if not any([name == key for key, value, default in self.schema]):
             return self.__dict__[name]
         if self._decoded is None:
             self._decoded = self._decode()
@@ -69,12 +80,12 @@ class Block(object):
             raise AttributeError(name)
 
     def __setattr__(self, name, value):
-        if not any([name == key for key, value in self.schema]):
+        if not any([name == key for key, value, default in self.schema]):
             self.__dict__[name] = value
             return
         if "_decoded" not in self.__dict__ or self.__dict__["_decoded"] is None:
             self._decoded = {}
-            for key, packed_type in self.schema:
+            for key, packed_type, default in self.schema:
                 self._decoded[key] = None
         self._decoded[name] = value
 
@@ -92,14 +103,9 @@ class Block(object):
 
 
 class SectionMemberBlock(Block):
-    def __init__(self, raw, section):
-        super(SectionMemberBlock, self).__init__(raw)
+    def __init__(self, section=None, **kwargs):
+        super(SectionMemberBlock, self).__init__(**kwargs)
         self.section = section
-
-    @classmethod
-    def from_context(cls, raw, ctx):
-        return cls(raw, section=ctx.current_section)
-
 
 def register_block(block):
     """Handy decorator to register a new known block type"""
@@ -111,18 +117,17 @@ def register_block(block):
 class SectionHeader(Block):
     magic_number = 0x0a0d0d0a
     schema = [
-        ('version_major', IntField(16, False)),
-        ('version_minor', IntField(16, False)),
-        ('section_length', IntField(64, True)),
+        ('version_major', IntField(16, False), 1),
+        ('version_minor', IntField(16, False), 0),
+        ('section_length', IntField(64, True), -1),
         ('options', OptionsField([
             (2, 'shb_hardware', 'string'),
             (3, 'shb_os', 'string'),
             (4, 'shb_userappl', 'string'),
-        ]))]
+        ]), None)]
 
-    def __init__(self, raw=None, endianness="<"):
-        self._raw = raw
-        self._decoded = None
+    def __init__(self, endianness="<", **kwargs):
+        super(SectionHeader, self).__init__(**kwargs)
         self.endianness = endianness
         self._interfaces_id = itertools.count(0)
         self.interfaces = {}
@@ -135,6 +140,16 @@ class SectionHeader(Block):
     def _encode(self, outstream):
         write_int(0x1A2B3C4D, outstream, 32, endianness=self.endianness)
         struct_encode(self.schema, self, outstream, endianness=self.endianness)
+
+    def new_member(self, cls, **kwargs):
+        """Helper method to create a block that's a member of this section"""
+        assert issubclass(cls, SectionMemberBlock)
+        blk = cls(section=self, **kwargs)
+        if isinstance(blk, InterfaceDescription):
+            self.register_interface(blk)
+        elif isinstance(blk, InterfaceStatistics):
+            self.add_interface_stats(blk)
+        return blk
 
     def register_interface(self, interface):
         """Helper method to register an interface within this section"""
@@ -170,9 +185,9 @@ class SectionHeader(Block):
 class InterfaceDescription(SectionMemberBlock):
     magic_number = 0x00000001
     schema = [
-        ('link_type', IntField(16, False)),  # todo: enc/decode
-        ('reserved', RawBytes(2)),
-        ('snaplen', IntField(32, False)),
+        ('link_type', IntField(16, False), 0),  # todo: enc/decode
+        ('reserved', RawBytes(2), bytes(2)),
+        ('snaplen', IntField(32, False), 0),
         ('options', OptionsField([
             (2, 'if_name', 'string'),
             (3, 'if_description', 'string'),
@@ -187,7 +202,7 @@ class InterfaceDescription(SectionMemberBlock):
             (12, 'if_os', 'string'),
             (13, 'if_fcslen', 'u8'),
             (14, 'if_tsoffset', 'i64'),
-        ]))]
+        ]), None)]
 
     @property  # todo: cache this property
     def timestamp_resolution(self):
@@ -261,15 +276,15 @@ class BasePacketBlock(
 class EnhancedPacket(BasePacketBlock):
     magic_number = 0x00000006
     schema = [
-        ('interface_id', IntField(32, False)),
-        ('timestamp_high', IntField(32, False)),
-        ('timestamp_low', IntField(32, False)),
-        ('packet_payload_info', PacketDataField()),
+        ('interface_id', IntField(32, False), 0),
+        ('timestamp_high', IntField(32, False), 0),
+        ('timestamp_low', IntField(32, False), 0),
+        ('packet_payload_info', PacketDataField(), PacketDataField()),
         ('options', OptionsField([
             (2, 'epb_flags', 'u32'),
             (3, 'epb_hash', 'type+bytes'),  # todo: process the hash value
             (4, 'epb_dropcount', 'u64'),
-        ]))
+        ]), None)
     ]
 
     @property
@@ -289,7 +304,7 @@ class EnhancedPacket(BasePacketBlock):
 class SimplePacket(SectionMemberBlock):
     magic_number = 0x00000003
     schema = [
-        ('packet_simple_payload_info', SimplePacketDataField()),
+        ('packet_simple_payload_info', SimplePacketDataField(), SimplePacketDataField()),
     ]
 
     @property
@@ -305,15 +320,15 @@ class SimplePacket(SectionMemberBlock):
 class Packet(BasePacketBlock):
     magic_number = 0x00000002
     schema = [
-        ('interface_id', IntField(16, False)),
-        ('drops_count', IntField(16, False)),
-        ('timestamp_high', IntField(32, False)),
-        ('timestamp_low', IntField(32, False)),
-        ('packet_payload_info', PacketDataField()),
+        ('interface_id', IntField(16, False), 0),
+        ('drops_count', IntField(16, False), 0),
+        ('timestamp_high', IntField(32, False), 0),
+        ('timestamp_low', IntField(32, False), 0),
+        ('packet_payload_info', PacketDataField(), PacketDataField()),
         ('options', OptionsField([
-            (2, 'epb_flags', 'u32'),  # A flag!
-            (3, 'epb_hash'),  # Variable size!
-        ]))
+            (2, 'pack_flags', 'u32'),       # Same definition as epb_flags
+            (3, 'pack_hash', 'type+bytes'), # Same definition as epb_hash
+        ]), None)
     ]
 
     @property
@@ -333,12 +348,12 @@ class Packet(BasePacketBlock):
 class NameResolution(SectionMemberBlock):
     magic_number = 0x00000004
     schema = [
-        ('records', ListField(NameResolutionRecordField())),
+        ('records', ListField(NameResolutionRecordField()), []),
         ('options', OptionsField([
             (2, 'ns_dnsname', 'string'),
             (3, 'ns_dnsIP4addr', 'ipv4'),
             (4, 'ns_dnsIP6addr', 'ipv6'),
-        ])),
+        ]), None),
     ]
 
 
@@ -347,9 +362,9 @@ class InterfaceStatistics(SectionMemberBlock, BlockWithTimestampMixin,
                           BlockWithInterfaceMixin):
     magic_number = 0x00000005
     schema = [
-        ('interface_id', IntField(32, False)),
-        ('timestamp_high', IntField(32, False)),
-        ('timestamp_low', IntField(32, False)),
+        ('interface_id', IntField(32, False), 0),
+        ('timestamp_high', IntField(32, False), 0),
+        ('timestamp_low', IntField(32, False), 0),
         ('options', OptionsField([
             (2, 'isb_starttime', 'u64'),  # todo: consider resolution
             (3, 'isb_endtime', 'u64'),
@@ -358,7 +373,7 @@ class InterfaceStatistics(SectionMemberBlock, BlockWithTimestampMixin,
             (6, 'isb_filteraccept', 'u64'),
             (7, 'isb_osdrop', 'u64'),
             (8, 'isb_usrdeliv', 'u64'),
-        ])),
+        ]), None),
     ]
 
 

@@ -167,9 +167,16 @@ Current status on that front:
 
 * Able to read a pcapng file and write out a new file and have the new
   file work
-* Able to add options to a block and write them out
+
+* Able to create new block objects in pure python and write them out
+
+  - ``SectionHeader`` has a ``new_member()`` method to make it easier to
+    create blocks and associate them with their section
+
+* Able to add options to a block (new or existing) and write them out
 
   - Adding strings is reasonably well tested so far
+
   - Other options and option types need more testing
 
 * Write support for NRBs
