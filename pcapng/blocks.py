@@ -15,7 +15,9 @@ import itertools
 import copy
 
 import six
+import pcapng
 
+import pcapng.strictness as strictness
 from pcapng.structs import (
     struct_decode, struct_encode, write_bytes_padded, write_int, RawBytes, IntField, OptionsField, PacketDataField,
     Options, ListField, NameResolutionRecordField, SimplePacketDataField)
@@ -103,7 +105,7 @@ class Block(object):
 
 
 class SectionMemberBlock(Block):
-    def __init__(self, section=None, **kwargs):
+    def __init__(self, section, **kwargs):
         super(SectionMemberBlock, self).__init__(**kwargs)
         self.section = section
 
@@ -346,6 +348,14 @@ class SimplePacket(SectionMemberBlock, BlockWithInterfaceMixin):
     def packet_data(self):
         return self.packet_simple_payload_info[1]
 
+    def encode(self, outstream):
+        if len(self.section.interfaces) > 1:
+            strictness.problem("writing SimplePacket for section with multiple interfaces")
+            if strictness.should_fix():
+                # Can't fix this. The IDBs have already been written.
+                pass
+        super(SimplePacket, self).encode(outstream)
+
 
 @register_block
 class Packet(BasePacketBlock):
@@ -373,6 +383,28 @@ class Packet(BasePacketBlock):
     @property
     def packet_data(self):
         return self.packet_payload_info[2]
+
+    def enhanced(self):
+        """Return an EnhancedPacket with this block's attributes."""
+        opts_dict = dict(self.options)
+        opts_dict['epb_dropcount'] = self.drops_count
+        if 'pack_flags' in opts_dict:
+            opts_dict['epb_flags'] = opts_dict.pop('pack_flags')
+        if 'pack_hash' in opts_dict:
+            opts_dict['epb_hash'] = opts_dict.pop('pack_hash')
+        return self.section.new_member(EnhancedPacket,
+                interface_id=self.interface_id,
+                timestamp_high=self.timestamp_high,
+                timestamp_low=self.timestamp_low,
+                packet_payload_info=self.packet_payload_info,
+                options=opts_dict)
+
+    def encode(self, outstream):
+        strictness.problem("Packet Block is obsolete and must not be used")
+        if strictness.should_fix():
+            self.enhanced().encode(outstream)
+        else:
+            super(Packet, self).encode(outstream)
 
 
 @register_block

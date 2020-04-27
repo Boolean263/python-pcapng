@@ -3,6 +3,11 @@ class PcapngException(Exception):
     pass
 
 
+class PcapngWarning(Warning):
+    """Base for all the pcapng warnings"""
+    pass
+
+
 class PcapngLoadError(PcapngException):
     """Indicate an error while loading a pcapng file"""
     pass
@@ -11,6 +16,14 @@ class PcapngLoadError(PcapngException):
 class PcapngDumpError(PcapngException):
     """Indicate an error while writing a pcapng file"""
     pass
+
+
+class PcapngStrictnessError(PcapngException):
+    """Indicate a condition about poorly formed pcapng files"""
+
+
+class PcapngStrictnessWarning(PcapngWarning):
+    """Indicate a condition about poorly formed pcapng files"""
 
 
 class StreamEmpty(PcapngLoadError):  # End of stream
