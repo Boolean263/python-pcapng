@@ -282,7 +282,7 @@ class EnhancedPacket(BasePacketBlock):
         ('interface_id', IntField(32, False), 0),
         ('timestamp_high', IntField(32, False), 0),
         ('timestamp_low', IntField(32, False), 0),
-        ('packet_payload_info', PacketDataField(), PacketDataField()),
+        ('packet_payload_info', PacketDataField(), None),
         ('options', OptionsField([
             (2, 'epb_flags', 'u32'),
             (3, 'epb_hash', 'type+bytes'),  # todo: process the hash value
@@ -304,19 +304,47 @@ class EnhancedPacket(BasePacketBlock):
 
 
 @register_block
-class SimplePacket(SectionMemberBlock):
+class SimplePacket(SectionMemberBlock, BlockWithInterfaceMixin):
+    """
+    "The Simple Packet Block (SPB) is a lightweight container for storing the
+    packets coming from the network. Its presence is optional."
+    - pcapng spec, section 4.4. Other quoted citations are from this section
+    unless otherwise noted.
+    """
     magic_number = 0x00000003
     schema = [
-        ('packet_simple_payload_info', SimplePacketDataField(), SimplePacketDataField()),
+        ('packet_simple_payload_info', SimplePacketDataField(), None),
     ]
 
     @property
+    def interface_id(self):
+        """
+        "The Simple Packet Block does not contain the Interface ID field.
+        Therefore, it MUST be assumed that all the Simple Packet Blocks have
+        been captured on the interface previously specified in the first
+        Interface Description Block."
+        """
+        return 0
+
+    @property
+    def captured_len(self):
+        """
+        "...the SnapLen value MUST be used to determine the size of the Packet
+        Data field length."
+        """
+        snap_len = self.interface.snaplen
+        if snap_len == 0: # unlimited
+            return self.packet_len
+        else:
+            return min(snap_len, self.packet_len)
+
+    @property
     def packet_len(self):
-        return self.packet_simple_payload_info[1]
+        return self.packet_simple_payload_info[0]
 
     @property
     def packet_data(self):
-        return self.packet_simple_payload_info[2]
+        return self.packet_simple_payload_info[1]
 
 
 @register_block
@@ -327,7 +355,7 @@ class Packet(BasePacketBlock):
         ('drops_count', IntField(16, False), 0),
         ('timestamp_high', IntField(32, False), 0),
         ('timestamp_low', IntField(32, False), 0),
-        ('packet_payload_info', PacketDataField(), PacketDataField()),
+        ('packet_payload_info', PacketDataField(), None),
         ('options', OptionsField([
             (2, 'pack_flags', 'u32'),       # Same definition as epb_flags
             (3, 'pack_hash', 'type+bytes'), # Same definition as epb_hash
