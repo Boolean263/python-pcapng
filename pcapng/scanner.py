@@ -55,12 +55,6 @@ class FileScanner(object):
 
         block = self._read_block(block_type)
 
-        if isinstance(block, blocks.InterfaceDescription):
-            self.current_section.register_interface(block)
-
-        elif isinstance(block, blocks.InterfaceStatistics):
-            self.current_section.add_interface_stats(block)
-
         return block
 
     def _read_section_header(self):
