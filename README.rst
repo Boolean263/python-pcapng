@@ -185,3 +185,26 @@ Current status on that front:
     even if the list contains only one entry
 
 * Write support for SPBs
+
+  - API compatibility with EPB and PB
+
+Planned/potential work:
+
+* API tweaks so creating blocks programmatically is nicer
+
+  - eg. specifying payload data to a packet and having it automatically
+    update the ``captured_len`` property
+
+* Configurable strictness checking when writing out a file
+
+  - When creating questionable data, either do nothing, warn about it,
+    fix it (if possible), or raise an error, with the strictest being the
+    default
+
+  - Some examples of when this would be a factor:
+
+    * Adding multiples of a non-repeatable option to a block
+
+    * Adding a SPB to a file with more than one interface
+
+    * Writing a PB (PBs are deprecated and not to be used in new files)
