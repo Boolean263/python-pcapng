@@ -39,15 +39,15 @@ class Block(object):
             self._decoded = {}
             for key, packed_type, default in self.schema:
                 if key == 'options':
-                    self._decoded['options'] = Options(schema=packed_type.options_schema, data={}, endianness='=')
+                    self._decoded[key] = Options(schema=packed_type.options_schema, data={}, endianness='=')
                 else:
                     self._decoded[key] = copy.deepcopy(default)
-            for key, val in kwargs.items():
-                if key == 'options':
-                    for oky, ovl in val.items():
+            for aky, avl in kwargs.items():
+                if aky == 'options':
+                    for oky, ovl in avl.items():
                         self.options[oky] = ovl
                 else:
-                    self.__setattr__(key, val)
+                    self.__setattr__(aky, avl)
 
     def _decode(self):
         return struct_decode(self.schema, six.BytesIO(self._raw),
@@ -145,6 +145,9 @@ class SectionHeader(Block):
         """Helper method to create a block that's a member of this section"""
         assert issubclass(cls, SectionMemberBlock)
         blk = cls(section=self, **kwargs)
+        # Some blocks (eg. SPB) don't have options
+        if any([True for x in blk.schema if x[0] == 'options']):
+            blk.options.endianness = self.endianness
         if isinstance(blk, InterfaceDescription):
             self.register_interface(blk)
         elif isinstance(blk, InterfaceStatistics):
