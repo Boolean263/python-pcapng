@@ -64,6 +64,8 @@ TYPE_IPV6_PREFIX = 'ipv6+prefix'
 TYPE_MACADDR = 'macaddr'
 TYPE_EUIADDR = 'euiaddr'
 TYPE_TYPE_BYTES = 'type+bytes'
+TYPE_OPT_CUSTOM_STR = 'opt_custom_str'
+TYPE_OPT_CUSTOM_BYTES = 'opt_custom_bytes'
 
 TYPE_U8 = 'u8'  # Unsigned integer, 8 bits
 TYPE_U16 = 'u16'
@@ -628,6 +630,9 @@ class Options(Mapping):
         - ``euiaddr``: a eui address [8 bytes]
         - ``type+bytes``: field where the first byte is a type, and
           the remainder is bytes
+        - ``opt_custom_str`` and ``opt_custom_bytes``: 4 bytes of Private
+          Enterprise Number, followed by str or bytes (see pcapng spec,
+          section 3.5.1)
 
     :param data:
         Initial data for the options. A list of two-tuples: ``(code, value)``.
@@ -650,6 +655,12 @@ class Options(Mapping):
         for item in [
             Option(0, 'opt_endofopt'),
             Option(1, 'opt_comment', TYPE_STRING, multiple=True),
+            # The spec calls all these next options ``opt_custom`` --
+            # I've renamed them here so they can be told apart
+            Option(2988, 'custom_str_safe', TYPE_OPT_CUSTOM_STR, multiple=True),
+            Option(2989, 'custom_bytes_safe', TYPE_OPT_CUSTOM_BYTES, multiple=True),
+            Option(19372, 'custom_str', TYPE_OPT_CUSTOM_STR, multiple=True),
+            Option(19373, 'custom_bytes', TYPE_OPT_CUSTOM_BYTES, multiple=True),
             ] + list(schema):
             if not isinstance(item, Option):
                 raise TypeError("expected option, got '{}'".format(item))
@@ -853,6 +864,14 @@ class Options(Mapping):
         if ftype == TYPE_TYPE_BYTES:
             return (value[0], value[1:])
 
+        if ftype == TYPE_OPT_CUSTOM_STR:
+            fmt = self.endianness + _numeric_types[TYPE_U32]
+            return (struct.unpack(fmt, value[0:4]), value[4:].decode('utf-8'))
+
+        if ftype == TYPE_OPT_CUSTOM_BYTES:
+            fmt = self.endianness + _numeric_types[TYPE_U32]
+            return (struct.unpack(fmt, value[0:4]), value[4:])
+
         raise ValueError('Unsupported field type: {0}'.format(ftype))
 
     def _encode_value(self, value, ftype):
@@ -906,6 +925,14 @@ class Options(Mapping):
 
         if ftype == TYPE_TYPE_BYTES:
             return value[0]+value[1]
+
+        if ftype == TYPE_OPT_CUSTOM_STR:
+            fmt = self.endianness + _numeric_types[TYPE_U32]
+            return struct.pack(fmt, value[0]) + value[1].encode('utf-8')
+
+        if ftype == TYPE_OPT_CUSTOM_BYTES:
+            fmt = self.endianness + _numeric_types[TYPE_U32]
+            return struct.pack(fmt, value[0]) + value[1]
 
         raise ValueError('Unsupported field type: {0}'.format(ftype))
 
