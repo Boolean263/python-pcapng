@@ -188,6 +188,20 @@ Current status on that front:
 
   - API compatibility with EPB and PB
 
+* Configurable strictness checking when writing out a file
+
+  - When creating questionable data, either do nothing, warn about it,
+    fix it (if possible), or raise an error, with the strictest being the
+    default
+
+  - Currently checked:
+
+    * Adding multiples of a non-repeatable option to a block
+
+    * Adding a SPB to a file with more than one interface
+
+    * Writing a PB (PBs are obsolete and not to be used in new files)
+
 Planned/potential work:
 
 * API tweaks so creating blocks programmatically is nicer
@@ -195,16 +209,3 @@ Planned/potential work:
   - eg. specifying payload data to a packet and having it automatically
     update the ``captured_len`` property
 
-* Configurable strictness checking when writing out a file
-
-  - When creating questionable data, either do nothing, warn about it,
-    fix it (if possible), or raise an error, with the strictest being the
-    default
-
-  - Some examples of when this would be a factor:
-
-    * Adding multiples of a non-repeatable option to a block
-
-    * Adding a SPB to a file with more than one interface
-
-    * Writing a PB (PBs are deprecated and not to be used in new files)

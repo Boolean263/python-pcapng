@@ -352,6 +352,14 @@ class SimplePacket(SectionMemberBlock, BlockWithInterfaceMixin):
 
     def encode(self, outstream):
         if len(self.section.interfaces) > 1:
+            # Spec is a bit ambiguous here. Section 4.4 says "it MUST
+            # be assumed that all the Simple Packet Blcoks have been captured
+            # on the interface previously specified in the first Interface
+            # Description Block." but later adds "A Simple Packet Block cannot
+            # be present in a Section that has more than one interface because
+            # of the impossibility to refer to the correct one (it does not
+            # contain any Interface ID field)." Why would it say "the first"
+            # IDB and not "the only" IDB if this was really forbidden?
             strictness.problem("writing SimplePacket for section with multiple interfaces")
             if strictness.should_fix():
                 # Can't fix this. The IDBs have already been written.
