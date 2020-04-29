@@ -21,6 +21,11 @@ def problem(msg):
     elif strictness in (STRICTNESS_WARN, STRICTNESS_FIX):
         warnings.warn(PcapngStrictnessWarning(msg))
 
+def warn(msg):
+    """Show a warning with the given message."""
+    if strictness > STRICTNESS_NONE:
+        warnings.warn(PcapngStrictnessWarning(msg))
+
 def should_fix():
     """Helper function for showing code used to fix questionable pcapng data."""
     return strictness == STRICTNESS_FIX

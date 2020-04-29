@@ -20,7 +20,7 @@ import pcapng
 import pcapng.strictness as strictness
 from pcapng.structs import (
     struct_decode, struct_encode, write_bytes_padded, write_int, RawBytes, IntField, OptionsField, PacketDataField,
-    Options, ListField, NameResolutionRecordField, SimplePacketDataField)
+    Options, Option, ListField, NameResolutionRecordField, SimplePacketDataField)
 from pcapng.constants import link_types
 from pcapng.utils import unpack_timestamp_resolution
 
@@ -123,9 +123,9 @@ class SectionHeader(Block):
         ('version_minor', IntField(16, False), 0),
         ('section_length', IntField(64, True), -1),
         ('options', OptionsField([
-            (2, 'shb_hardware', 'string'),
-            (3, 'shb_os', 'string'),
-            (4, 'shb_userappl', 'string'),
+            Option(2, 'shb_hardware', 'string'),
+            Option(3, 'shb_os', 'string'),
+            Option(4, 'shb_userappl', 'string'),
         ]), None)]
 
     def __init__(self, endianness="<", **kwargs):
@@ -134,10 +134,6 @@ class SectionHeader(Block):
         self._interfaces_id = itertools.count(0)
         self.interfaces = {}
         self.interface_stats = {}
-
-    def _decode(self):
-        return struct_decode(self.schema, six.BytesIO(self._raw),
-                             endianness=self.endianness)
 
     def _encode(self, outstream):
         write_int(0x1A2B3C4D, outstream, 32, endianness=self.endianness)
@@ -176,6 +172,11 @@ class SectionHeader(Block):
     def length(self):
         return self.section_length
 
+    # Block.decode() assumes all blocks have sections -- technically true...
+    @property
+    def section(self):
+        return self
+
     def __repr__(self):
         return ('<{name} version={version} endianness={endianness} '
                 'length={length} options={options}>').format(
@@ -194,19 +195,20 @@ class InterfaceDescription(SectionMemberBlock):
         ('reserved', RawBytes(2), bytes(2)),
         ('snaplen', IntField(32, False), 0),
         ('options', OptionsField([
-            (2, 'if_name', 'string'),
-            (3, 'if_description', 'string'),
-            (4, 'if_IPv4addr', 'ipv4+mask'),
-            (5, 'if_IPv6addr', 'ipv6+prefix'),
-            (6, 'if_MACaddr', 'macaddr'),
-            (7, 'if_EUIaddr', 'euiaddr'),
-            (8, 'if_speed', 'u64'),
-            (9, 'if_tsresol'),  # Just keep the raw data
-            (10, 'if_tzone', 'u32'),
-            (11, 'if_filter', 'type+bytes'),
-            (12, 'if_os', 'string'),
-            (13, 'if_fcslen', 'u8'),
-            (14, 'if_tsoffset', 'i64'),
+            Option(2, 'if_name', 'string'),
+            Option(3, 'if_description', 'string'),
+            Option(4, 'if_IPv4addr', 'ipv4+mask', multiple=True),
+            Option(5, 'if_IPv6addr', 'ipv6+prefix', multiple=True),
+            Option(6, 'if_MACaddr', 'macaddr'),
+            Option(7, 'if_EUIaddr', 'euiaddr'),
+            Option(8, 'if_speed', 'u64'),
+            Option(9, 'if_tsresol'),  # Just keep the raw data
+            Option(10, 'if_tzone', 'u32'),
+            Option(11, 'if_filter', 'type+bytes'),
+            Option(12, 'if_os', 'string'),
+            Option(13, 'if_fcslen', 'u8'),
+            Option(14, 'if_tsoffset', 'i64'),
+            Option(15, 'if_hardware', 'string'),
         ]), None)]
 
     @property  # todo: cache this property
@@ -286,9 +288,9 @@ class EnhancedPacket(BasePacketBlock):
         ('timestamp_low', IntField(32, False), 0),
         ('packet_payload_info', PacketDataField(), None),
         ('options', OptionsField([
-            (2, 'epb_flags', 'u32'),
-            (3, 'epb_hash', 'type+bytes'),  # todo: process the hash value
-            (4, 'epb_dropcount', 'u64'),
+            Option(2, 'epb_flags', 'u32'),
+            Option(3, 'epb_hash', 'type+bytes', multiple=True),  # todo: process the hash value
+            Option(4, 'epb_dropcount', 'u64'),
         ]), None)
     ]
 
@@ -367,8 +369,8 @@ class Packet(BasePacketBlock):
         ('timestamp_low', IntField(32, False), 0),
         ('packet_payload_info', PacketDataField(), None),
         ('options', OptionsField([
-            (2, 'pack_flags', 'u32'),       # Same definition as epb_flags
-            (3, 'pack_hash', 'type+bytes'), # Same definition as epb_hash
+            Option(2, 'pack_flags', 'u32'),       # Same definition as epb_flags
+            Option(3, 'pack_hash', 'type+bytes', multiple=True), # Same definition as epb_hash
         ]), None)
     ]
 
@@ -413,9 +415,9 @@ class NameResolution(SectionMemberBlock):
     schema = [
         ('records', ListField(NameResolutionRecordField()), []),
         ('options', OptionsField([
-            (2, 'ns_dnsname', 'string'),
-            (3, 'ns_dnsIP4addr', 'ipv4'),
-            (4, 'ns_dnsIP6addr', 'ipv6'),
+            Option(2, 'ns_dnsname', 'string'),
+            Option(3, 'ns_dnsIP4addr', 'ipv4'),
+            Option(4, 'ns_dnsIP6addr', 'ipv6'),
         ]), None),
     ]
 
@@ -429,13 +431,13 @@ class InterfaceStatistics(SectionMemberBlock, BlockWithTimestampMixin,
         ('timestamp_high', IntField(32, False), 0),
         ('timestamp_low', IntField(32, False), 0),
         ('options', OptionsField([
-            (2, 'isb_starttime', 'u64'),  # todo: consider resolution
-            (3, 'isb_endtime', 'u64'),
-            (4, 'isb_ifrecv', 'u64'),
-            (5, 'isb_ifdrop', 'u64'),
-            (6, 'isb_filteraccept', 'u64'),
-            (7, 'isb_osdrop', 'u64'),
-            (8, 'isb_usrdeliv', 'u64'),
+            Option(2, 'isb_starttime', 'u64'),  # todo: consider resolution
+            Option(3, 'isb_endtime', 'u64'),
+            Option(4, 'isb_ifrecv', 'u64'),
+            Option(5, 'isb_ifdrop', 'u64'),
+            Option(6, 'isb_filteraccept', 'u64'),
+            Option(7, 'isb_osdrop', 'u64'),
+            Option(8, 'isb_usrdeliv', 'u64'),
         ]), None),
     ]
 

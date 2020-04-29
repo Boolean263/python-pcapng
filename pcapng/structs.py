@@ -9,9 +9,9 @@ import warnings
 import socket
 
 try:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Iterable
 except ImportError:
-    from collections import Mapping
+    from collections import Mapping, Iterable
 
 import six
 
@@ -20,6 +20,28 @@ from pcapng.exceptions import (
 from pcapng.utils import (
     pack_euiaddr, pack_ipv4, pack_ipv6, pack_macaddr,
     unpack_euiaddr, unpack_ipv4, unpack_ipv6, unpack_macaddr)
+import pcapng.strictness as strictness
+
+# version-portable namedtuple with defaults, adapted from
+# https://stackoverflow.com/a/18348004/6692652
+from collections import namedtuple as _namedtuple
+def namedtuple(typename, field_names, defaults=None):
+    if not defaults:
+        # No defaults given or needed
+        return _namedtuple(typename, field_names)
+    try:
+        # Python 3.7+
+        return _namedtuple(typename, field_names, defaults=defaults)
+    except TypeError:
+        T = _namedtuple(typename, field_names)
+        try:
+            # Python 2.7, up to 3.6
+            T.__new__.__defaults__ = defaults
+        except AttributeError:
+            # Older Python 2.x
+            T.__new__.func_defaults = defaults
+        return T
+
 
 SECTION_HEADER_MAGIC = 0x0a0d0d0a
 BYTE_ORDER_MAGIC = 0x1a2b3c4d
@@ -558,11 +580,22 @@ def write_options(stream, options):
 
     for key in options:
         code = options._field_names[key]
-        for value in options.get_all_raw(key):
+        values = options.get_all_raw(key)
+        if len(values) > 1 and not options.schema[code].multiple:
+            strictness.problem("writing repeated option {} '{}' not permitted by pcapng spec".format(code, options._get_name_alias(code)))
+            if strictness.should_fix():
+                values = values[:1]
+        for value in values:
             write_int(code, stream, 16, False, options.endianness)
             write_int(len(value), stream, 16, False, options.endianness)
             write_bytes_padded(stream, value)
     write_int(0, stream, 16, False, options.endianness)
+
+
+# Class representing a single option schema for Options.
+# require code and name; by default, empty ftype, forbid multiples
+Option = namedtuple('Option', ('code', 'name', 'ftype', 'multiple'),
+        defaults=(None, False))
 
 class Options(Mapping):
     """
@@ -581,9 +614,7 @@ class Options(Mapping):
         to a dictionary).
 
     :param schema:
-        Definition of the known options: a list of 2- or 3-tuples
-        (the third argument is optional) representing, respectively,
-        the numeric option code, the option name and the value type.
+        Definition of the known options: a list of Option objects.
 
         The following value types are currently supported:
 
@@ -610,17 +641,20 @@ class Options(Mapping):
     """
 
     def __init__(self, schema, data, endianness):
-        self.schema = {}  # Schema of option fields: {<code>: {..def..}}
+        self.schema = {}  # Schema of option fields: {<code>: Option(...)}
         self._field_names = {}  # Map names to codes
         self.raw_data = {}  # List of (code, value) tuples
         self.endianness = endianness  # one of '<>!='
 
         # This is the default schema, common to all objects
-        self._update_schema([
-            (0, 'opt_endofopt'),
-            (1, 'opt_comment', TYPE_STRING),
-        ])
-        self._update_schema(schema)
+        for item in [
+            Option(0, 'opt_endofopt'),
+            Option(1, 'opt_comment', TYPE_STRING, multiple=True),
+            ] + list(schema):
+            if not isinstance(item, Option):
+                raise TypeError("expected option, got '{}'".format(item))
+            self.schema[item.code] = item
+        self._field_names = { x.name : x.code for x in self.schema.values() }
 
         # Update raw data with current values
         self._update_data(data)
@@ -638,19 +672,25 @@ class Options(Mapping):
             yield self._get_name_alias(key)
 
     def __setitem__(self, name, value):
+        # This also gets called for ``block.options[name] += value``
+        # as if ``block.options[name] = block.options[name] + value``
+        # which means that, if value is a string, each character gets added
+        # separately. Workaround: wrap the string in [ ], or use ``add()``
         code = self._resolve_name(name)
-        if code == 0:
-            raise KeyError(name)
-        ftype = self.schema[code]["ftype"]
-        value = self._encode_value(value, ftype)
-        self.raw_data[code] = [ value ]
+        ftype = self.schema[code].ftype
+        if isinstance(value, Iterable) and not isinstance(value, six.string_types+(six.binary_type,)):
+            # We're being assigned a list/iterable, use its values for our list
+            self.raw_data[code] = [ self._encode_value(v, ftype) for v in value ]
+            self._check_multiples(code)
+        else:
+            # We're being assigned a single value, store as a list
+            value = self._encode_value(value, ftype)
+            self.raw_data[code] = [ value ]
 
     def __delitem__(self, name):
         code = self._resolve_name(name)
-        if code == 0:
-            raise KeyError(name)
         try:
-            del self.raw_data[name]
+            del self.raw_data[code]
         except KeyError:
             raise KeyError(name)
 
@@ -677,11 +717,12 @@ class Options(Mapping):
     def add(self, name, value):
         """Add a value to the given-named option"""
         code = self._resolve_name(name)
-        if code == 0:
-            raise KeyError(name)
-        ftype = self.schema[code]["ftype"]
+        ftype = self.schema[code].ftype
         value = self._encode_value(value, ftype)
-        self._update_data([(code, value)])
+        if code not in self.raw_data:
+            self.raw_data[code] = []
+        self.raw_data[code].append(value)
+        self._check_multiples(code)
 
     def __repr__(self):
         args = dict(self.iter_all_items())
@@ -689,22 +730,6 @@ class Options(Mapping):
         return '{0}({1!r})'.format(name, args)
 
     # -------------------- Internal methods --------------------
-
-    def _update_schema(self, schema):
-
-        def _make_option(code, name, ftype=TYPE_BYTES):
-            return code, name, ftype
-
-        for item in schema:
-            try:
-                code, name, ftype = _make_option(*item)
-
-            except TypeError:
-                # Better error message
-                raise TypeError('Options schema item must be a 2- or 3-tuple')
-
-            self.schema[code] = {'name': name, 'ftype': ftype}
-            self._field_names[name] = code
 
     def _update_data(self, data):
         if data is None:
@@ -714,19 +739,36 @@ class Options(Mapping):
             if code not in self.raw_data:
                 self.raw_data[code] = []
             self.raw_data[code].append(value)
+            if len(self.raw_data[code]) > 1 and not self.schema[code].multiple:
+                try:
+                    name = "{} '{}'".format(code, self.schema[code].name)
+                except KeyError:
+                    name = "{} (unknown)".format(code)
+                # This code gets called when reading a file. We don't want
+                # to potentially abort in this case, just warn
+                strictness.warn("repeated option {} not permitted by pcapng spec".format(name))
+
+    def _check_multiples(self, code):
+        """Check if a non-repeatable option is repeated"""
+        if len(self.raw_data[code]) > 1 and not self.schema[code].multiple:
+            strictness.problem("repeated option {} '{}' not permitted by pcapng spec".format(code, self._get_name_alias(code)))
+            if strictness.should_fix():
+                self.raw_data[code] = self.raw_data[code][:1]
 
     def _resolve_name(self, name):
-        return self._field_names.get(name) or name
+        code = self._field_names.get(name, name)
+        if code == 0:
+            # opt_endofopt is special and should never be touched by the user
+            raise KeyError(name)
+        return code
 
     def _get_name_alias(self, code):
         if code in self.schema:
-            return self.schema[code]['name']
+            return self.schema[code].name
         return code
 
     def _get_raw(self, name):
         _name = self._resolve_name(name)
-        if _name == 0:
-            raise KeyError(name)
         try:
             return self.raw_data[_name][0]
         except KeyError:
@@ -734,8 +776,6 @@ class Options(Mapping):
 
     def _get_all_raw(self, name):
         _name = self._resolve_name(name)
-        if _name == 0:
-            raise KeyError(name)
         try:
             return list(self.raw_data[_name])
         except KeyError:
@@ -751,18 +791,14 @@ class Options(Mapping):
 
     def _decode(self, code, value):
         code = self._resolve_name(code)
-        if code == 0:
-            raise KeyError(name)
         if code in self.schema:
-            return self._decode_value(value, self.schema[code]['ftype'])
+            return self._decode_value(value, self.schema[code].ftype)
         return value
 
     def _decode_all(self, code, values):
         code = self._resolve_name(code)
-        if code == 0:
-            raise KeyError(name)
         if code in self.schema:
-            return [self._decode_value(value, self.schema[code]['ftype'])
+            return [self._decode_value(value, self.schema[code].ftype)
                     for value in values]
         return values
 
