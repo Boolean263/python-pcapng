@@ -18,9 +18,11 @@ import six
 import pcapng
 
 import pcapng.strictness as strictness
+import pcapng.exceptions as exceptions
 from pcapng.structs import (
-    struct_decode, struct_encode, write_bytes_padded, write_int, RawBytes, IntField, OptionsField, PacketDataField,
-    Options, Option, ListField, NameResolutionRecordField, SimplePacketDataField)
+    write_bytes_padded, write_int,
+    IntField, OptionsField, PacketBytes,
+    Options, Option, ListField, NameResolutionRecordField)
 from pcapng.constants import link_types
 from pcapng.utils import unpack_timestamp_resolution
 
@@ -32,6 +34,7 @@ class Block(object):
     """Base class for blocks"""
 
     schema = []
+    readonly_fields = set()
 
     def __init__(self, **kwargs):
         if 'raw' in kwargs:
@@ -52,10 +55,17 @@ class Block(object):
                     self.__setattr__(aky, avl)
 
     def _decode(self):
-        return struct_decode(self.schema, six.BytesIO(self._raw),
-                             endianness=self.section.endianness)
+        """Decodes the raw data of this block into its fields"""
+        self._decoded = {}
+        stream = six.BytesIO(self._raw)
+        for name, field, default in self.schema:
+            if isinstance(field, PacketBytes):
+                field.captured_len = self.captured_len
+            self._decoded[name] = field.load(stream, endianness=self.section.endianness)
+        del self._raw
 
-    def encode(self, outstream):
+    def write(self, outstream):
+        """Writes this block into the given output stream"""
         encoded_block = six.BytesIO()
         self._encode(encoded_block)
         encoded_block = encoded_block.getvalue()
@@ -69,19 +79,23 @@ class Block(object):
         write_int(block_length, outstream, 32)
 
     def _encode(self, outstream):
-        struct_encode(self.schema, self, outstream, endianness=self.section.endianness)
+        """Encodes the fields of this block into raw data"""
+        for name, field, default in self.schema:
+            field.encode(getattr(self, name), outstream, endianness=self.section.endianness)
 
     def __getattr__(self, name):
         if not any([name == key for key, value, default in self.schema]):
             return self.__dict__[name]
         if self._decoded is None:
-            self._decoded = self._decode()
+            self._decode()
         try:
             return self._decoded[name]
         except KeyError:
             raise AttributeError(name)
 
     def __setattr__(self, name, value):
+        if name in self.readonly_fields:
+            raise exceptions.PcapngException("can't set read-only property '{prop}' on {cls}".format(prop=name, cls=self.__class__.__name__))
         if not any([name == key for key, value, default in self.schema]):
             self.__dict__[name] = value
             return
@@ -137,7 +151,7 @@ class SectionHeader(Block):
 
     def _encode(self, outstream):
         write_int(0x1A2B3C4D, outstream, 32, endianness=self.endianness)
-        struct_encode(self.schema, self, outstream, endianness=self.endianness)
+        super(SectionHeader, self)._encode(outstream)
 
     def new_member(self, cls, **kwargs):
         """Helper method to create a block that's a member of this section"""
@@ -192,7 +206,7 @@ class InterfaceDescription(SectionMemberBlock):
     magic_number = 0x00000001
     schema = [
         ('link_type', IntField(16, False), 0),  # todo: enc/decode
-        ('reserved', RawBytes(2), bytes(2)),
+        ('reserved', IntField(16, False), 0),
         ('snaplen', IntField(32, False), 0),
         ('options', OptionsField([
             Option(2, 'if_name', 'string'),
@@ -264,29 +278,53 @@ class BlockWithTimestampMixin(object):
 
 
 class BlockWithInterfaceMixin(object):
+    """
+    Block mixin for blocks that have/require an interface.
+    """
+
     @property
     def interface(self):
         # We need to get the correct interface from the section
         # by looking up the interface_id
         return self.section.interfaces[self.interface_id]
 
+    def write(self, outstream):
+        if len(self.section.interfaces) < 1:
+            strictness.problem("writing {cls} for section with no interfaces".format(cls=self.__class__.__name__))
+            if strictness.should_fix():
+                # Only way to "fix" is to not write the block
+                return
+        super(BlockWithInterfaceMixin, self).write(outstream)
+
 
 class BasePacketBlock(
         SectionMemberBlock,
-        BlockWithInterfaceMixin,
-        BlockWithTimestampMixin):
-    """Base class for the "EnhancedPacket" and "Packet" blocks"""
-    pass
+        BlockWithInterfaceMixin):
+    """
+    Base class for blocks with packet data.
+    They must have ``captured_len`` and ``packet_data`` in their schema.
+    """
+
+    def __init__(self, **kwargs):
+        super(BasePacketBlock, self).__init__(**kwargs)
+        # captured_len is the length of our packet data
+        self.readonly_fields.add('captured_len')
+
+    @property
+    def captured_len(self):
+        return len(self.packet_data)
 
 
 @register_block
-class EnhancedPacket(BasePacketBlock):
+class EnhancedPacket(BasePacketBlock, BlockWithTimestampMixin):
     magic_number = 0x00000006
     schema = [
         ('interface_id', IntField(32, False), 0),
         ('timestamp_high', IntField(32, False), 0),
         ('timestamp_low', IntField(32, False), 0),
-        ('packet_payload_info', PacketDataField(), None),
+        ('captured_len', IntField(32, False), 0),
+        ('packet_len', IntField(32, False), 0),
+        ('packet_data', PacketBytes(), None),
         ('options', OptionsField([
             Option(2, 'epb_flags', 'u32'),
             Option(3, 'epb_hash', 'type+bytes', multiple=True),  # todo: process the hash value
@@ -294,21 +332,9 @@ class EnhancedPacket(BasePacketBlock):
         ]), None)
     ]
 
-    @property
-    def captured_len(self):
-        return self.packet_payload_info[0]
-
-    @property
-    def packet_len(self):
-        return self.packet_payload_info[1]
-
-    @property
-    def packet_data(self):
-        return self.packet_payload_info[2]
-
 
 @register_block
-class SimplePacket(SectionMemberBlock, BlockWithInterfaceMixin):
+class SimplePacket(BasePacketBlock):
     """
     "The Simple Packet Block (SPB) is a lightweight container for storing the
     packets coming from the network. Its presence is optional."
@@ -317,8 +343,13 @@ class SimplePacket(SectionMemberBlock, BlockWithInterfaceMixin):
     """
     magic_number = 0x00000003
     schema = [
-        ('packet_simple_payload_info', SimplePacketDataField(), None),
+        ('packet_len', IntField(32, False), 0), # NOT the captured length
+        ('packet_data', PacketBytes(), None),
     ]
+
+    def __init__(self, **kwargs):
+        super(SimplePacket, self).__init__(**kwargs)
+        self.readonly_fields.add('interface_id')
 
     @property
     def interface_id(self):
@@ -342,18 +373,10 @@ class SimplePacket(SectionMemberBlock, BlockWithInterfaceMixin):
         else:
             return min(snap_len, self.packet_len)
 
-    @property
-    def packet_len(self):
-        return self.packet_simple_payload_info[0]
-
-    @property
-    def packet_data(self):
-        return self.packet_simple_payload_info[1]
-
-    def encode(self, outstream):
+    def write(self, outstream):
         if len(self.section.interfaces) > 1:
             # Spec is a bit ambiguous here. Section 4.4 says "it MUST
-            # be assumed that all the Simple Packet Blcoks have been captured
+            # be assumed that all the Simple Packet Blocks have been captured
             # on the interface previously specified in the first Interface
             # Description Block." but later adds "A Simple Packet Block cannot
             # be present in a Section that has more than one interface because
@@ -364,35 +387,25 @@ class SimplePacket(SectionMemberBlock, BlockWithInterfaceMixin):
             if strictness.should_fix():
                 # Can't fix this. The IDBs have already been written.
                 pass
-        super(SimplePacket, self).encode(outstream)
+        super(SimplePacket, self).write(outstream)
 
 
 @register_block
-class Packet(BasePacketBlock):
+class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
     magic_number = 0x00000002
     schema = [
         ('interface_id', IntField(16, False), 0),
         ('drops_count', IntField(16, False), 0),
         ('timestamp_high', IntField(32, False), 0),
         ('timestamp_low', IntField(32, False), 0),
-        ('packet_payload_info', PacketDataField(), None),
+        ('captured_len', IntField(32, False), 0),
+        ('packet_len', IntField(32, False), 0),
+        ('packet_data', PacketBytes(), None),
         ('options', OptionsField([
             Option(2, 'pack_flags', 'u32'),       # Same definition as epb_flags
             Option(3, 'pack_hash', 'type+bytes', multiple=True), # Same definition as epb_hash
         ]), None)
     ]
-
-    @property
-    def captured_len(self):
-        return self.packet_payload_info[0]
-
-    @property
-    def packet_len(self):
-        return self.packet_payload_info[1]
-
-    @property
-    def packet_data(self):
-        return self.packet_payload_info[2]
 
     def enhanced(self):
         """Return an EnhancedPacket with this block's attributes."""
@@ -406,15 +419,16 @@ class Packet(BasePacketBlock):
                 interface_id=self.interface_id,
                 timestamp_high=self.timestamp_high,
                 timestamp_low=self.timestamp_low,
-                packet_payload_info=self.packet_payload_info,
+                packet_len=self.packet_len,
+                packet_data=self.packet_data,
                 options=opts_dict)
 
-    def encode(self, outstream):
+    def write(self, outstream):
         strictness.problem("Packet Block is obsolete and must not be used")
         if strictness.should_fix():
-            self.enhanced().encode(outstream)
+            self.enhanced().write(outstream)
         else:
-            super(Packet, self).encode(outstream)
+            super(ObsoletePacket, self).write(outstream)
 
 
 @register_block

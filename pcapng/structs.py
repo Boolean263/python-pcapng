@@ -316,10 +316,10 @@ class RawBytes(StructField):
         self.size = size  # in bytes!
 
     def load(self, stream, endianness):
-        return read_bytes(stream, self.size)
+        return read_bytes_padded(stream, self.size)
 
     def encode(self, value, stream, endianness):
-        write_bytes_padded(stream, value, self.size)
+        write_bytes_padded(stream, value)
 
     def __repr__(self):
         return ('{0}(size={1!r})'.format(self.__class__.__name__, self.size))
@@ -380,51 +380,23 @@ class OptionsField(StructField):
                 .format(self.__class__.__name__, self.options_schema))
 
 
-class PacketDataField(StructField):
+class PacketBytes(StructField):
     """
-    Field containing some "packet data", used in the Packet
-    and EnhancedPacket blocks.
-
-    The packet data is composed of three fields (returned in a tuple):
-
-    - captured len (uint32)
-    - packet len (uint32)
-    - packet data (captured_len-sized binary data)
+    Field containing some "packet data", used in the Packet,
+    EnhancedPacket, and SimplePacket blocks.
     """
 
-    def load(self, stream, endianness):
-        captured_len = read_int(stream, 32, False, endianness)
-        packet_len = read_int(stream, 32, False, endianness)
-        packet_data = read_bytes_padded(stream, captured_len)
-        return captured_len, packet_len, packet_data
+    # This must be set before calling ``load()``. It's a little
+    # janky but makes for a nicer interface overall.
+    captured_len = 0
 
-    def encode(self, packet, stream, endianness):
+    def load(self, stream, endianness=None):
+        return read_bytes_padded(stream, self.captured_len)
+
+    def encode(self, packet, stream, endianness=None):
         if not packet:
             raise ValueError("Packet invalid")
-        write_int(packet[0], stream, 32, False, endianness)
-        write_int(packet[1], stream, 32, False, endianness)
-        write_bytes_padded(stream, packet[2])
-
-class SimplePacketDataField(StructField):
-    """
-    Field containing packet data from a SimplePacket object.
-
-    The packet data is represented by two fields (returned as a tuple):
-
-    - packet_len (uint32)
-    - packet_data (packet_len-sized binary data)
-    """
-
-    def load(self, stream, endianness):
-        packet_len = read_int(stream, 32, False, endianness)
-        packet_data = read_bytes_padded(stream, packet_len)
-        return packet_len, packet_data
-
-    def encode(self, packet, stream, endianness):
-        if not packet:
-            raise ValueError("Packet invalid")
-        write_int(packet[0], stream, 32, False, endianness)
-        write_bytes_padded(stream, packet[1])
+        write_bytes_padded(stream, packet)
 
 
 class ListField(StructField):
@@ -484,7 +456,7 @@ class NameResolutionRecordField(StructField):
     - ``0x02`` - ipv6 address resolution
 
     In both cases, the payload is composed of a valid address in the
-    selected IP version, followed by domain name up to the field end.
+    selected IP version, followed by null-separated/terminated domain names.
     """
 
     def load(self, stream, endianness):
@@ -515,10 +487,7 @@ class NameResolutionRecordField(StructField):
     def encode(self, d, stream, endianness):
         write_int(d['type'], stream, 16, endianness=endianness)
 
-        if d['type'] == NRB_RECORD_END:
-            write_int(0, stream, 16, endianness=endianness)
-
-        elif d['type'] == NRB_RECORD_IPv4:
+        if d['type'] == NRB_RECORD_IPv4:
             raw = socket.inet_pton(socket.AF_INET, d['address'])
             raw += (b"\x00".join([ s.encode() for s in d['names'] ]))+b"\x00"
             write_int(len(raw), stream, 16, endianness=endianness)
@@ -577,7 +546,8 @@ def write_options(stream, options):
     - value_length (uint16)
     - value (value_length-sized binary data)
 
-    The end marker is simply an option with code ``0x0000`` and no payload
+    The end marker is simply an option with code ``0x0000``, length 0,
+    and no payload
     """
 
     for key in options:
@@ -591,7 +561,8 @@ def write_options(stream, options):
             write_int(code, stream, 16, False, options.endianness)
             write_int(len(value), stream, 16, False, options.endianness)
             write_bytes_padded(stream, value)
-    write_int(0, stream, 16, False, options.endianness)
+    # Write the end marker
+    write_int(0, stream, 32, False, options.endianness)
 
 
 # Class representing a single option schema for Options.
