@@ -9,8 +9,7 @@ def pack_ipv4(data):
     return socket.inet_aton(data)
 
 def unpack_ipv4(data):
-    return socket.inet_ntoa(six.b(data))
-
+    return socket.inet_ntoa(data)
 
 def _get_pairs(data):
     """Return data in pairs
@@ -31,10 +30,7 @@ def pack_ipv6(data):
     return socket.inet_pton(socket.AF_INET6, data)
 
 def unpack_ipv6(data):
-    data = six.b(data)
-    return ':'.join(
-        '{0:02x}{1:02x}'.format(x, y)
-        for (x, y) in _get_pairs(six.iterbytes(data)))
+    return socket.inet_ntop(socket.AF_INET6, data)
 
 def pack_macaddr(data):
     a = [int(x, 16) for x in data.split(':')]
