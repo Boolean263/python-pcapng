@@ -6,7 +6,6 @@ import abc
 import io
 import struct
 import warnings
-import socket
 
 try:
     from collections.abc import Mapping, Iterable
@@ -471,14 +470,14 @@ class NameResolutionRecordField(StructField):
         if record_type == NRB_RECORD_IPv4:
             return {
                 'type': record_type,
-                'address': socket.inet_ntop(socket.AF_INET, data[:4]),
+                'address': unpack_ipv4(data[:4]),
                 'names': [ x.decode() for x in data[4:-1].split(b"\x00") ],
             }
 
         if record_type == NRB_RECORD_IPv6:
             return {
                 'type': record_type,
-                'address': socket.inet_ntop(socket.AF_INET6, data[:16]),
+                'address': unpack_ipv6(data[:16]),
                 'names': [ x.decode() for x in data[16:-1].split(b"\x00") ],
             }
 
@@ -488,13 +487,13 @@ class NameResolutionRecordField(StructField):
         write_int(d['type'], stream, 16, endianness=endianness)
 
         if d['type'] == NRB_RECORD_IPv4:
-            raw = socket.inet_pton(socket.AF_INET, d['address'])
+            raw = pack_ipv4(d['address'])
             raw += (b"\x00".join([ s.encode() for s in d['names'] ]))+b"\x00"
             write_int(len(raw), stream, 16, endianness=endianness)
             write_bytes_padded(stream, raw)
 
         elif d['type'] == NRB_RECORD_IPv6:
-            raw = socket.inet_pton(socket.AF_INET6, d['address'])
+            raw = pack_ipv6(d['address'])
             raw += (b'\x00'.join([ s.encode() for s in d['names'] ]))+b"\x00"
             write_int(len(raw), stream, 16, endianness=endianness)
             write_bytes_padded(stream, raw)
