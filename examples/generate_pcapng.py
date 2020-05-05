@@ -13,10 +13,10 @@ shb = blocks.SectionHeader(options={
     'shb_os':'python',
     'shb_userappl':'python-pcapng'
     })
-shb.encode(args.outfile)
+shb.write(args.outfile)
 idb = shb.new_member(blocks.InterfaceDescription, link_type=1,
         options={"if_description": "Hand-rolled", "if_os": "Python"})
-idb.encode(args.outfile)
+idb.write(args.outfile)
 
 
 test_pl = (
@@ -36,5 +36,5 @@ test_pl = (
 )
 
 spb = shb.new_member(blocks.SimplePacket)
-spb.packet_simple_payload_info = (len(test_pl), bytes(test_pl))
-spb.encode(args.outfile)
+spb.packet_data = bytes(test_pl)
+spb.write(args.outfile)

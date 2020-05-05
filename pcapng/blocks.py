@@ -12,10 +12,8 @@ better access to decoded information, ...
 
 import io
 import itertools
-import copy
 
 import six
-import pcapng
 
 import pcapng.strictness as strictness
 import pcapng.exceptions as exceptions
@@ -46,7 +44,7 @@ class Block(object):
                 if key == 'options':
                     self._decoded[key] = Options(schema=packed_type.options_schema, data={}, endianness='=')
                 else:
-                    self._decoded[key] = copy.deepcopy(default)
+                    self._decoded[key] = default
             for aky, avl in kwargs.items():
                 if aky == 'options':
                     for oky, ovl in avl.items():
@@ -119,6 +117,7 @@ class Block(object):
 
 
 class SectionMemberBlock(Block):
+    """Block which must be a member of a section"""
     def __init__(self, section, **kwargs):
         super(SectionMemberBlock, self).__init__(**kwargs)
         self.section = section
@@ -131,6 +130,14 @@ def register_block(block):
 
 @register_block
 class SectionHeader(Block):
+    """
+    "The Section Header Block (SHB) is mandatory. It identifies the beginning
+    of a section of the capture file. The Section Header Block does not contain
+    data but it rather identifies a list of blocks (interfaces, packets) that
+    are logically correlated."
+    - pcapng spec, section 4.1. Other quoted citations are from this section
+    unless otherwise noted.
+    """
     magic_number = 0x0a0d0d0a
     schema = [
         ('version_major', IntField(16, False), 1),
@@ -158,7 +165,7 @@ class SectionHeader(Block):
         assert issubclass(cls, SectionMemberBlock)
         blk = cls(section=self, **kwargs)
         # Some blocks (eg. SPB) don't have options
-        if any([True for x in blk.schema if x[0] == 'options']):
+        if any([x[0] == 'options' for x in blk.schema]):
             blk.options.endianness = self.endianness
         if isinstance(blk, InterfaceDescription):
             self.register_interface(blk)
@@ -203,6 +210,12 @@ class SectionHeader(Block):
 
 @register_block
 class InterfaceDescription(SectionMemberBlock):
+    """
+    "An Interface Description Block (IDB) is the container for information
+    describing an interface on which packet data is captured."
+    - pcapng spec, section 4.2. Other quoted citations are from this section
+    unless otherwise noted.
+    """
     magic_number = 0x00000001
     schema = [
         ('link_type', IntField(16, False), 0),  # todo: enc/decode
@@ -280,6 +293,7 @@ class BlockWithTimestampMixin(object):
 class BlockWithInterfaceMixin(object):
     """
     Block mixin for blocks that have/require an interface.
+    This includes all packet blocks as well as InterfaceStatistics.
     """
 
     @property
@@ -302,7 +316,14 @@ class BasePacketBlock(
         BlockWithInterfaceMixin):
     """
     Base class for blocks with packet data.
-    They must have ``captured_len`` and ``packet_data`` in their schema.
+    They must have these fields in their schema:
+
+    * ``packet_len`` is the original amount of data that was "on the wire"
+        (this can differ from ``captured_len``)
+    * ``packet_data`` is the actual binary packet data (of course)
+
+    This class makes the ``captured_len`` a read-only property returning
+    the current length of the packet data.
     """
 
     def __init__(self, **kwargs):
@@ -314,9 +335,22 @@ class BasePacketBlock(
     def captured_len(self):
         return len(self.packet_data)
 
+    # Helper function. If the user hasn't explicitly set an original packet
+    # length, use the length of the captured packet data.
+    @property
+    def packet_len(self):
+        plen = self.__getattr__('packet_len') # this call prevents recursion
+        return plen or len(self.packet_data)
+
 
 @register_block
 class EnhancedPacket(BasePacketBlock, BlockWithTimestampMixin):
+    """
+    "An Enhanced Packet Block (EPB) is the standard container for storing the
+    packets coming from the network."
+    - pcapng spec, section 4.3. Other quoted citations are from this section
+    unless otherwise noted.
+    """
     magic_number = 0x00000006
     schema = [
         ('interface_id', IntField(32, False), 0),
@@ -324,7 +358,7 @@ class EnhancedPacket(BasePacketBlock, BlockWithTimestampMixin):
         ('timestamp_low', IntField(32, False), 0),
         ('captured_len', IntField(32, False), 0),
         ('packet_len', IntField(32, False), 0),
-        ('packet_data', PacketBytes(), None),
+        ('packet_data', PacketBytes(), b''),
         ('options', OptionsField([
             Option(2, 'epb_flags', 'u32'),
             Option(3, 'epb_hash', 'type+bytes', multiple=True),  # todo: process the hash value
@@ -337,14 +371,14 @@ class EnhancedPacket(BasePacketBlock, BlockWithTimestampMixin):
 class SimplePacket(BasePacketBlock):
     """
     "The Simple Packet Block (SPB) is a lightweight container for storing the
-    packets coming from the network. Its presence is optional."
+    packets coming from the network."
     - pcapng spec, section 4.4. Other quoted citations are from this section
     unless otherwise noted.
     """
     magic_number = 0x00000003
     schema = [
         ('packet_len', IntField(32, False), 0), # NOT the captured length
-        ('packet_data', PacketBytes(), None),
+        ('packet_data', PacketBytes(), b''),
     ]
 
     def __init__(self, **kwargs):
@@ -392,6 +426,12 @@ class SimplePacket(BasePacketBlock):
 
 @register_block
 class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
+    """
+    "The Packet Block is obsolete, and MUST NOT be used in new files. [...] A
+    Packet Block was a container for storing packets coming from the network."
+    - pcapng spec, Appendix A. Other quoted citations are from this appendix
+    unless otherwise noted.
+    """
     magic_number = 0x00000002
     schema = [
         ('interface_id', IntField(16, False), 0),
@@ -400,7 +440,7 @@ class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
         ('timestamp_low', IntField(32, False), 0),
         ('captured_len', IntField(32, False), 0),
         ('packet_len', IntField(32, False), 0),
-        ('packet_data', PacketBytes(), None),
+        ('packet_data', PacketBytes(), b''),
         ('options', OptionsField([
             Option(2, 'pack_flags', 'u32'),       # Same definition as epb_flags
             Option(3, 'pack_hash', 'type+bytes', multiple=True), # Same definition as epb_hash
@@ -411,10 +451,11 @@ class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
         """Return an EnhancedPacket with this block's attributes."""
         opts_dict = dict(self.options)
         opts_dict['epb_dropcount'] = self.drops_count
-        if 'pack_flags' in opts_dict:
-            opts_dict['epb_flags'] = opts_dict.pop('pack_flags')
-        if 'pack_hash' in opts_dict:
-            opts_dict['epb_hash'] = opts_dict.pop('pack_hash')
+        for a in ('flags', 'hash'):
+            try:
+                opts_dict['epb_'+a] = opts_dict.pop('pack_'+a)
+            except KeyError:
+                pass
         return self.section.new_member(EnhancedPacket,
                 interface_id=self.interface_id,
                 timestamp_high=self.timestamp_high,
@@ -433,6 +474,16 @@ class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
 
 @register_block
 class NameResolution(SectionMemberBlock):
+    """
+    "The Name Resolution Block (NRB) is used to support the correlation of
+    numeric addresses (present in the captured packets) and their corresponding
+    canonical names [...]. Having the literal names saved in the file prevents
+    the need for performing name resolution at a later time, when the
+    association between names and addresses may be different from the one in
+    use at capture time."
+    - pcapng spec, section 4.5. Other quoted citations are from this section
+    unless otherwise noted.
+    """
     magic_number = 0x00000004
     schema = [
         ('records', ListField(NameResolutionRecordField()), []),
@@ -447,6 +498,13 @@ class NameResolution(SectionMemberBlock):
 @register_block
 class InterfaceStatistics(SectionMemberBlock, BlockWithTimestampMixin,
                           BlockWithInterfaceMixin):
+    """
+    "The Interface Statistics Block (ISB) contains the capture statistics for a
+    given interface [...]. The statistics are referred to the interface defined
+    in the current Section identified by the Interface ID field."
+    - pcapng spec, section 4.6. Other quoted citations are from this section
+    unless otherwise noted.
+    """
     magic_number = 0x00000005
     schema = [
         ('interface_id', IntField(32, False), 0),

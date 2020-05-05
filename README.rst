@@ -202,10 +202,12 @@ Current status on that front:
 
     * Writing a PB (PBs are obsolete and not to be used in new files)
 
-Planned/potential work:
+* API tweaks so creating blocks programmatically is nicer (still in progress)
 
-* API tweaks so creating blocks programmatically is nicer
-
-  - eg. specifying payload data to a packet and having it automatically
+  - specifying payload data to a packet and having it automatically
     update the ``captured_len`` property
+
+  - if the ``packet_len`` field (the original length of a packet) isn't set,
+    assume it's equal to the ``captured_len`` (the amount of the packet that
+    got captured)
 
