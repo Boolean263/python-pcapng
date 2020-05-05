@@ -946,7 +946,7 @@ def struct_encode(schema, obj, outstream, endianness='='):
 
 def struct_decode_string(schema, data):
     """Utility function to pass a string to :py:func:`struct_decode`"""
-    return struct_decode(schema, six.BytesIO())
+    return struct_decode(schema, six.BytesIO(data))
 
 
 def struct_encode_string(schema, obj):
