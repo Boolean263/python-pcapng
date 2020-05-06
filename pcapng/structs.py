@@ -7,40 +7,15 @@ import io
 import struct
 import warnings
 
-try:
-    from collections.abc import Mapping, Iterable
-except ImportError:
-    from collections import Mapping, Iterable
-
 import six
 
+from pcapng.ngsix import namedtuple, Mapping, Iterable
 from pcapng.exceptions import (
     BadMagic, CorruptedFile, StreamEmpty, TruncatedFile)
 from pcapng.utils import (
     pack_euiaddr, pack_ipv4, pack_ipv6, pack_macaddr,
     unpack_euiaddr, unpack_ipv4, unpack_ipv6, unpack_macaddr)
 import pcapng.strictness as strictness
-
-# version-portable namedtuple with defaults, adapted from
-# https://stackoverflow.com/a/18348004/6692652
-from collections import namedtuple as _namedtuple
-def namedtuple(typename, field_names, defaults=None):
-    if not defaults:
-        # No defaults given or needed
-        return _namedtuple(typename, field_names)
-    try:
-        # Python 3.7+
-        return _namedtuple(typename, field_names, defaults=defaults)
-    except TypeError:
-        T = _namedtuple(typename, field_names)
-        try:
-            # Python 2.7, up to 3.6
-            T.__new__.__defaults__ = defaults
-        except AttributeError:
-            # Older Python 2.x
-            T.__new__.func_defaults = defaults
-        return T
-
 
 SECTION_HEADER_MAGIC = 0x0a0d0d0a
 BYTE_ORDER_MAGIC = 0x1a2b3c4d
