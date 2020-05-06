@@ -593,7 +593,7 @@ class Options(Mapping):
     def __init__(self, schema, data, endianness):
         self.schema = {}  # Schema of option fields: {<code>: Option(...)}
         self._field_names = {}  # Map names to codes
-        self.raw_data = {}  # List of (code, value) tuples
+        self.data = {}  # List of (code, value) tuples
         self.endianness = endianness  # one of '<>!='
 
         # This is the default schema, common to all objects
@@ -618,13 +618,14 @@ class Options(Mapping):
     # -------------------- Nice interface :) --------------------
 
     def __getitem__(self, name):
-        return self._get_decoded(name)
+        code = self._resolve_name(name)
+        return self.data[code][0]
 
     def __len__(self):
-        return len(self.raw_data)
+        return len(self.data)
 
     def __iter__(self):
-        for key in self.raw_data:
+        for key in self.data:
             yield self._get_name_alias(key)
 
     def __setitem__(self, name, value):
@@ -633,34 +634,32 @@ class Options(Mapping):
         # which means that, if value is a string, each character gets added
         # separately. Workaround: wrap the string in [ ], or use ``add()``
         code = self._resolve_name(name)
-        ftype = self.schema[code].ftype
         if isinstance(value, Iterable) and not isinstance(value, six.string_types+(six.binary_type,)):
             # We're being assigned a list/iterable, use its values for our list
-            self.raw_data[code] = [ self._encode_value(v, ftype) for v in value ]
+            self.data[code] = list(value)
             self._check_multiples(code)
         else:
-            # We're being assigned a single value, store as a list
-            value = self._encode_value(value, ftype)
-            self.raw_data[code] = [ value ]
+            # We're being assigned a single value, store as a one-item list
+            self.data[code] = [ value ]
 
     def __delitem__(self, name):
         code = self._resolve_name(name)
-        try:
-            del self.raw_data[code]
-        except KeyError:
-            raise KeyError(name)
+        del self.data[code]
 
     def get_all(self, name):
         """Get all values for the given option"""
-        return self._get_all_decoded(name)
+        code = self._resolve_name(name)
+        return self.data[code]
 
     def get_raw(self, name):
         """Get raw value for the given option"""
-        return self._get_raw(name)
+        code = self._resolve_name(name)
+        return self._encode_value(self.data[code][0], self.schema[code].ftype)
 
     def get_all_raw(self, name):
         """Get all raw values for the given option"""
-        return self._get_all_raw(name)
+        code = self._resolve_name(name)
+        return [self._encode_value(x, self.schema[code].ftype) for x in self.data[code]]
 
     def iter_all_items(self):
         """
@@ -673,11 +672,9 @@ class Options(Mapping):
     def add(self, name, value):
         """Add a value to the given-named option"""
         code = self._resolve_name(name)
-        ftype = self.schema[code].ftype
-        value = self._encode_value(value, ftype)
-        if code not in self.raw_data:
-            self.raw_data[code] = []
-        self.raw_data[code].append(value)
+        if code not in self.data:
+            self.data[code] = []
+        self.data[code].append(value)
         self._check_multiples(code)
 
     def __repr__(self):
@@ -692,10 +689,10 @@ class Options(Mapping):
             return
 
         for code, value in data:
-            if code not in self.raw_data:
-                self.raw_data[code] = []
-            self.raw_data[code].append(value)
-            if len(self.raw_data[code]) > 1 and not self.schema[code].multiple:
+            if code not in self.data:
+                self.data[code] = []
+            self.data[code].append(self._decode(code, value))
+            if len(self.data[code]) > 1 and not self.schema[code].multiple:
                 try:
                     name = "{} '{}'".format(code, self.schema[code].name)
                 except KeyError:
@@ -706,10 +703,10 @@ class Options(Mapping):
 
     def _check_multiples(self, code):
         """Check if a non-repeatable option is repeated"""
-        if len(self.raw_data[code]) > 1 and not self.schema[code].multiple:
+        if len(self.data[code]) > 1 and not self.schema[code].multiple:
             strictness.problem("repeated option {} '{}' not permitted by pcapng spec".format(code, self._get_name_alias(code)))
             if strictness.should_fix():
-                self.raw_data[code] = self.raw_data[code][:1]
+                self.data[code] = self.data[code][:1]
 
     def _resolve_name(self, name):
         code = self._field_names.get(name, name)
@@ -722,28 +719,6 @@ class Options(Mapping):
         if code in self.schema:
             return self.schema[code].name
         return code
-
-    def _get_raw(self, name):
-        _name = self._resolve_name(name)
-        try:
-            return self.raw_data[_name][0]
-        except KeyError:
-            raise KeyError(name)
-
-    def _get_all_raw(self, name):
-        _name = self._resolve_name(name)
-        try:
-            return list(self.raw_data[_name])
-        except KeyError:
-            raise KeyError(name)
-
-    def _get_decoded(self, name):
-        value = self._get_raw(name)
-        return self._decode(name, value)
-
-    def _get_all_decoded(self, name):
-        value = self._get_all_raw(name)
-        return self._decode_all(name, value)
 
     def _decode(self, code, value):
         code = self._resolve_name(code)
