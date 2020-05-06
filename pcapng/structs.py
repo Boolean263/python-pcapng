@@ -10,6 +10,8 @@ import warnings
 import six
 
 from pcapng.ngsix import namedtuple, Mapping, Iterable
+from pcapng.flags import (
+    FlagWord, FlagField, FlagBool, FlagUInt, FlagEnum)
 from pcapng.exceptions import (
     BadMagic, CorruptedFile, StreamEmpty, TruncatedFile)
 from pcapng.utils import (
@@ -38,6 +40,7 @@ TYPE_IPV6_PREFIX = 'ipv6+prefix'
 TYPE_MACADDR = 'macaddr'
 TYPE_EUIADDR = 'euiaddr'
 TYPE_TYPE_BYTES = 'type+bytes'
+TYPE_EPBFLAGS = 'epb_flags'
 TYPE_OPT_CUSTOM_STR = 'opt_custom_str'
 TYPE_OPT_CUSTOM_BYTES = 'opt_custom_bytes'
 
@@ -539,6 +542,34 @@ def write_options(stream, options):
     write_int(0, stream, 32, False, options.endianness)
 
 
+class EPBFlags(FlagWord):
+    """Class representing the epb_flags option on an EPB"""
+
+    def __init__(self, val=0):
+        super(EPBFlags, self).__init__([
+                FlagField('inout', FlagEnum, 2, ('NA', 'inbound', 'outbound')),
+                FlagField('casttype', FlagEnum, 3, ('NA', 'unicast', 'multicast', 'broadcast', 'promiscuous')),
+                FlagField('fcslen', FlagUInt, 4),
+                FlagField('reserved', FlagUInt, 7),
+                FlagField('err_16', FlagBool),
+                FlagField('err_17', FlagBool),
+                FlagField('err_18', FlagBool),
+                FlagField('err_19', FlagBool),
+                FlagField('err_20', FlagBool),
+                FlagField('err_21', FlagBool),
+                FlagField('err_22', FlagBool),
+                FlagField('err_23', FlagBool),
+                FlagField('err_crc', FlagBool),
+                FlagField('err_long', FlagBool),
+                FlagField('err_short', FlagBool),
+                FlagField('err_frame_gap', FlagBool),
+                FlagField('err_frame_align', FlagBool),
+                FlagField('err_frame_delim', FlagBool),
+                FlagField('err_preamble', FlagBool),
+                FlagField('err_symbol', FlagBool),
+            ], nbits=32, initial=val)
+
+
 # Class representing a single option schema for Options.
 # require code and name; by default, empty ftype, forbid multiples
 Option = namedtuple('Option', ('code', 'name', 'ftype', 'multiple'),
@@ -784,6 +815,11 @@ class Options(Mapping):
         if ftype == TYPE_TYPE_BYTES:
             return (value[0], value[1:])
 
+        if ftype == TYPE_EPBFLAGS:
+            fmt = self.endianness + _numeric_types[TYPE_U32]
+            flg = struct.unpack(fmt, value)[0]
+            return EPBFlags(flg)
+
         if ftype == TYPE_OPT_CUSTOM_STR:
             fmt = self.endianness + _numeric_types[TYPE_U32]
             return (struct.unpack(fmt, value[0:4]), value[4:].decode('utf-8'))
@@ -845,6 +881,10 @@ class Options(Mapping):
 
         if ftype == TYPE_TYPE_BYTES:
             return value[0]+value[1]
+
+        if ftype == TYPE_EPBFLAGS:
+            fmt = self.endianness + _numeric_types[TYPE_U32]
+            return struct.pack(fmt, int(value))
 
         if ftype == TYPE_OPT_CUSTOM_STR:
             fmt = self.endianness + _numeric_types[TYPE_U32]

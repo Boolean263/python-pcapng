@@ -19,7 +19,7 @@ import pcapng.strictness as strictness
 import pcapng.exceptions as exceptions
 from pcapng.structs import (
     write_bytes_padded, write_int,
-    IntField, OptionsField, PacketBytes,
+    IntField, OptionsField, PacketBytes, EPBFlags,
     Options, Option, ListField, NameResolutionRecordField)
 from pcapng.constants import link_types
 from pcapng.utils import unpack_timestamp_resolution
@@ -360,7 +360,7 @@ class EnhancedPacket(BasePacketBlock, BlockWithTimestampMixin):
         ('packet_len', IntField(32, False), 0),
         ('packet_data', PacketBytes(), b''),
         ('options', OptionsField([
-            Option(2, 'epb_flags', 'u32'),
+            Option(2, 'epb_flags', 'epb_flags'),
             Option(3, 'epb_hash', 'type+bytes', multiple=True),  # todo: process the hash value
             Option(4, 'epb_dropcount', 'u64'),
         ]), None)
@@ -442,7 +442,7 @@ class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
         ('packet_len', IntField(32, False), 0),
         ('packet_data', PacketBytes(), b''),
         ('options', OptionsField([
-            Option(2, 'pack_flags', 'u32'),       # Same definition as epb_flags
+            Option(2, 'pack_flags', 'epb_flags'),                # Same definition as epb_flags
             Option(3, 'pack_hash', 'type+bytes', multiple=True), # Same definition as epb_hash
         ]), None)
     ]

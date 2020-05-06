@@ -211,3 +211,7 @@ Current status on that front:
     assume it's equal to the ``captured_len`` (the amount of the packet that
     got captured)
 
+  - Access individual fields of the ``epb_flags`` option on EPB/PB blocks
+    using a nice flag API rather than having to figure out the bitmasks
+    and whatnot yourself
+
