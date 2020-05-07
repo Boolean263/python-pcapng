@@ -18,8 +18,8 @@ import six
 import pcapng.strictness as strictness
 import pcapng.exceptions as exceptions
 from pcapng.structs import (
-    write_bytes_padded, write_int,
-    IntField, OptionsField, PacketBytes, EPBFlags,
+    write_bytes_padded, write_int, block_decode, struct_decode,
+    IntField, OptionsField, RawBytes, PacketBytes, EPBFlags,
     Options, Option, ListField, NameResolutionRecordField)
 from pcapng.constants import link_types
 from pcapng.utils import unpack_timestamp_resolution
@@ -54,12 +54,8 @@ class Block(object):
 
     def _decode(self):
         """Decodes the raw data of this block into its fields"""
-        self._decoded = {}
         stream = six.BytesIO(self._raw)
-        for name, field, default in self.schema:
-            if isinstance(field, PacketBytes):
-                field.captured_len = self.captured_len
-            self._decoded[name] = field.load(stream, endianness=self.section.endianness)
+        self._decoded = block_decode(self, stream)
         del self._raw
 
     def write(self, outstream):
@@ -82,11 +78,11 @@ class Block(object):
             field.encode(getattr(self, name), outstream, endianness=self.section.endianness)
 
     def __getattr__(self, name):
-        if not any([name == key for key, value, default in self.schema]):
-            return self.__dict__[name]
-        if self._decoded is None:
-            self._decode()
         try:
+            if not any([name == key for key, value, default in self.schema]):
+                return self.__dict__[name]
+            if self._decoded is None:
+                self._decode()
             return self._decoded[name]
         except KeyError:
             raise AttributeError(name)
@@ -229,7 +225,7 @@ class InterfaceDescription(SectionMemberBlock):
             Option(6, 'if_MACaddr', 'macaddr'),
             Option(7, 'if_EUIaddr', 'euiaddr'),
             Option(8, 'if_speed', 'u64'),
-            Option(9, 'if_tsresol'),  # Just keep the raw data
+            Option(9, 'if_tsresol', 'bytes'),  # Just keep the raw data
             Option(10, 'if_tzone', 'u32'),
             Option(11, 'if_filter', 'type+bytes'),
             Option(12, 'if_os', 'string'),
@@ -326,10 +322,7 @@ class BasePacketBlock(
     the current length of the packet data.
     """
 
-    def __init__(self, **kwargs):
-        super(BasePacketBlock, self).__init__(**kwargs)
-        # captured_len is the length of our packet data
-        self.readonly_fields.add('captured_len')
+    readonly_fields = set(('captured_len',))
 
     @property
     def captured_len(self):
@@ -358,7 +351,7 @@ class EnhancedPacket(BasePacketBlock, BlockWithTimestampMixin):
         ('timestamp_low', IntField(32, False), 0),
         ('captured_len', IntField(32, False), 0),
         ('packet_len', IntField(32, False), 0),
-        ('packet_data', PacketBytes(), b''),
+        ('packet_data', PacketBytes('captured_len'), b''),
         ('options', OptionsField([
             Option(2, 'epb_flags', 'epb_flags'),
             Option(3, 'epb_hash', 'type+bytes', multiple=True),  # todo: process the hash value
@@ -378,12 +371,20 @@ class SimplePacket(BasePacketBlock):
     magic_number = 0x00000003
     schema = [
         ('packet_len', IntField(32, False), 0), # NOT the captured length
-        ('packet_data', PacketBytes(), b''),
+        ('packet_data', PacketBytes('captured_len'), b''), # we don't actually use this
     ]
 
-    def __init__(self, **kwargs):
-        super(SimplePacket, self).__init__(**kwargs)
-        self.readonly_fields.add('interface_id')
+    readonly_fields = set(('captured_len', 'interface_id'))
+
+    def _decode(self):
+        """Decodes the raw data of this block into its fields"""
+        stream = six.BytesIO(self._raw)
+        self._decoded = struct_decode(self.schema[:1], stream, self.section.endianness)
+        # Now we can get our ``captured_len`` property which is required
+        # to really know how much data we can load
+        self._decoded['packet_data'] = RawBytes(self.captured_len).load(stream, self.section.endianness)
+        del self._raw
+
 
     @property
     def interface_id(self):
@@ -440,7 +441,7 @@ class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
         ('timestamp_low', IntField(32, False), 0),
         ('captured_len', IntField(32, False), 0),
         ('packet_len', IntField(32, False), 0),
-        ('packet_data', PacketBytes(), b''),
+        ('packet_data', PacketBytes('captured_len'), b''),
         ('options', OptionsField([
             Option(2, 'pack_flags', 'epb_flags'),                # Same definition as epb_flags
             Option(3, 'pack_hash', 'type+bytes', multiple=True), # Same definition as epb_hash

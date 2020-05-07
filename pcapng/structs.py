@@ -13,7 +13,7 @@ from pcapng.ngsix import namedtuple, Mapping, Iterable
 from pcapng.flags import (
     FlagWord, FlagField, FlagBool, FlagUInt, FlagEnum)
 from pcapng.exceptions import (
-    BadMagic, CorruptedFile, StreamEmpty, TruncatedFile)
+    BadMagic, CorruptedFile, StreamEmpty, TruncatedFile, PcapngLoadError)
 from pcapng.utils import (
     pack_euiaddr, pack_ipv4, pack_ipv6, pack_macaddr,
     unpack_euiaddr, unpack_ipv4, unpack_ipv6, unpack_macaddr)
@@ -269,7 +269,7 @@ class StructField(object):
     __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
-    def load(self, stream, endianness):
+    def load(self, stream, endianness, seen=None):
         pass
 
     def __repr__(self):
@@ -292,7 +292,7 @@ class RawBytes(StructField):
     def __init__(self, size):
         self.size = size  # in bytes!
 
-    def load(self, stream, endianness):
+    def load(self, stream, endianness, seen=None):
         return read_bytes_padded(stream, self.size)
 
     def encode(self, value, stream, endianness):
@@ -316,7 +316,7 @@ class IntField(StructField):
         self.size = size  # in bits!
         self.signed = signed
 
-    def load(self, stream, endianness):
+    def load(self, stream, endianness, seen=None):
         number = read_int(stream, self.size, signed=self.signed,
                           endianness=endianness)
         return number
@@ -344,7 +344,7 @@ class OptionsField(StructField):
     def __init__(self, options_schema):
         self.options_schema = options_schema
 
-    def load(self, stream, endianness):
+    def load(self, stream, endianness, seen=None):
         options = read_options(stream, endianness)
         return Options(schema=self.options_schema, data=options,
                        endianness=endianness)
@@ -363,12 +363,17 @@ class PacketBytes(StructField):
     EnhancedPacket, and SimplePacket blocks.
     """
 
-    # This must be set before calling ``load()``. It's a little
-    # janky but makes for a nicer interface overall.
-    captured_len = 0
+    def __init__(self, len_field):
+        self.dependency = len_field
 
-    def load(self, stream, endianness=None):
-        return read_bytes_padded(stream, self.captured_len)
+    def load(self, stream, endianness, seen=None):
+        try:
+            length = seen[self.dependency]
+        except TypeError:
+            raise PcapngLoadError("PacketBytes dependent on field '{0}' which wasn't passed".format(self.dependency))
+        except KeyError:
+            raise PcapngLoadError("PacketBytes dependent on field '{0}' which was never found".format(self.dependency))
+        return read_bytes_padded(stream, length)
 
     def encode(self, packet, stream, endianness=None):
         if not packet:
@@ -396,7 +401,7 @@ class ListField(StructField):
     def __init__(self, subfield):
         self.subfield = subfield
 
-    def load(self, stream, endianness):
+    def load(self, stream, endianness, seen=None):
         return list(self._iter_load(stream, endianness))
 
     def _iter_load(self, stream, endianness):
@@ -436,7 +441,7 @@ class NameResolutionRecordField(StructField):
     selected IP version, followed by null-separated/terminated domain names.
     """
 
-    def load(self, stream, endianness):
+    def load(self, stream, endianness, seen=None):
         record_type = read_int(stream, 16, False, endianness)
         record_length = read_int(stream, 16, False, endianness)
 
@@ -449,14 +454,14 @@ class NameResolutionRecordField(StructField):
             return {
                 'type': record_type,
                 'address': unpack_ipv4(data[:4]),
-                'names': [ x.decode() for x in data[4:-1].split(b"\x00") ],
+                'names': [ x.decode() for x in data[4:].split(b"\x00") ],
             }
 
         if record_type == NRB_RECORD_IPv6:
             return {
                 'type': record_type,
                 'address': unpack_ipv6(data[:16]),
-                'names': [ x.decode() for x in data[16:-1].split(b"\x00") ],
+                'names': [ x.decode() for x in data[16:].split(b"\x00") ],
             }
 
         return {'type': record_type, 'raw': data}
@@ -896,6 +901,7 @@ class Options(Mapping):
 
         raise ValueError('Unsupported field type: {0}'.format(ftype))
 
+
 def struct_decode(schema, stream, endianness='='):
     """
     Decode structured data from a stream, following a schema.
@@ -921,8 +927,12 @@ def struct_decode(schema, stream, endianness='='):
 
     decoded = {}
     for name, field, default in schema:
-        decoded[name] = field.load(stream, endianness=endianness)
+        decoded[name] = field.load(stream, endianness=endianness, seen=decoded)
     return decoded
+
+
+def block_decode(block, stream):
+    return struct_decode(block.schema, stream, block.section.endianness)
 
 
 def struct_encode(schema, obj, outstream, endianness='='):
