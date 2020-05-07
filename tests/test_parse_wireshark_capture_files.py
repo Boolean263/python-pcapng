@@ -1,7 +1,7 @@
 import pytest
 
 from pcapng.scanner import FileScanner
-from pcapng.blocks import SectionHeader, InterfaceDescription, Packet
+from pcapng.blocks import SectionHeader, InterfaceDescription, ObsoletePacket
 
 
 def test_sample_test001_ntar():
@@ -143,8 +143,28 @@ def test_sample_test006_ntar(filename):
         assert blocks[1].options['if_description'] == \
             'Stupid ethernet interface\x00'
 
-        assert isinstance(blocks[2], Packet)
+        assert isinstance(blocks[2], ObsoletePacket)
         assert blocks[2].interface_id == 0
+        assert blocks[2].options['pack_flags'].inout == 'NA'
+        assert blocks[2].options['pack_flags'].casttype == 'NA'
+        assert blocks[2].options['pack_flags'].fcslen == 0
+        assert blocks[2].options['pack_flags'].reserved == 0
+        assert blocks[2].options['pack_flags'].err_16 == False
+        assert blocks[2].options['pack_flags'].err_17 == False
+        assert blocks[2].options['pack_flags'].err_18 == False
+        assert blocks[2].options['pack_flags'].err_19 == False
+        assert blocks[2].options['pack_flags'].err_20 == False
+        assert blocks[2].options['pack_flags'].err_21 == False
+        assert blocks[2].options['pack_flags'].err_22 == False
+        assert blocks[2].options['pack_flags'].err_23 == False
+        assert blocks[2].options['pack_flags'].err_crc == False
+        assert blocks[2].options['pack_flags'].err_long == False
+        assert blocks[2].options['pack_flags'].err_short == False
+        assert blocks[2].options['pack_flags'].err_frame_gap == False
+        assert blocks[2].options['pack_flags'].err_frame_align == False
+        assert blocks[2].options['pack_flags'].err_frame_delim == False
+        assert blocks[2].options['pack_flags'].err_preamble == False
+        assert blocks[2].options['pack_flags'].err_symbol == False
 
 # ============================================================
 # Dissection of test006.ntar
@@ -182,7 +202,7 @@ def test_sample_test006_ntar(filename):
 # 00000050:                     0000 0000            End of options block
 # 00000050:                               4400 0000  Block total length (68)
 
-# -------------------- Packet --------------------
+# -------------------- Packet (Obsolete) --------------------
 
 # 00000060: 0200 0000                                Block Magic
 # 00000060:           a700 0000                      Block size (167(!??))
