@@ -532,6 +532,10 @@ def write_options(stream, options):
     and no payload
     """
 
+    if not options:
+        # Options are optional; if there are none we don't need opt_endofopt
+        return
+
     for key in options:
         code = options._field_names[key]
         values = options.get_all_raw(key)
