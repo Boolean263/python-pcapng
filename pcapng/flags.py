@@ -31,18 +31,13 @@ class FlagBase(object):
         self.owner._value &= ~self.mask
         self.owner._value |= (val << self.offset)
 
-    def __repr__(self):
-        return '<{n} offset={o} size={s} mask=0x{m:08x} shift=0x{h:08x}'.format(
-                n=self.__class__.__name__, o=self.offset, s=self.size,
-                m=self.mask)
-
 
 class FlagBool(FlagBase):
-    """FlagBase representing a single boolean flag"""
+    """Object representing a single boolean flag"""
 
     def __init__(self, owner, offset, size, extra=None):
         if size != 1:
-            raise TypeError('FlagBool can only be 1 bit in size')
+            raise TypeError('{cls} can only be 1 bit in size'.format(cls=self.__class__.__name__))
         super(FlagBool, self).__init__(owner, offset, size)
 
     def get(self):
@@ -53,7 +48,10 @@ class FlagBool(FlagBase):
 
 
 class FlagUInt(FlagBase):
-    """FlagBase representing an unsigned integer of the given size"""
+    """\
+    Object representing an unsigned integer of the given size stored in
+    a larger bitfield
+    """
 
     def get(self):
         return self.get_bits()
@@ -63,13 +61,18 @@ class FlagUInt(FlagBase):
 
 
 class FlagEnum(FlagBase):
-    """FlagBase representing a range of values"""
+    """\
+    Object representing a range of values stored in part of a larger
+    bitfield
+    """
 
     def __init__(self, owner, offset, size, extra=None):
-        if size < 2:
-            raise TypeError('FlagEnum must be at least 2 bits in size')
         if not isinstance(extra, Iterable):
-            raise TypeError('FlagEnum needs an iterable of values')
+            raise TypeError('{cls} needs an iterable of values'.format(cls=self.__class__.__name__))
+        extra = list(extra)
+        if len(extra) > 2**size:
+            raise TypeError('{cls} iterable has too many values (got {got}, {size} bits only address {max})'.format(cls=self.__class__.__name__, got=len(extra), size=size, max=2**size))
+
         super(FlagEnum, self).__init__(owner, offset, size, extra)
 
     def get(self):
@@ -85,7 +88,7 @@ class FlagEnum(FlagBase):
         elif isinstance(val, int):
             self.set_bits(val)
         else:
-            raise TypeError('Invalid value {0} for FlagEnum'.format(val))
+            raise TypeError('Invalid value {val} for {cls}'.format(val=val, cls=self.__class__.__name__))
 
 
 # Class representing a single flag schema for FlagWord.
@@ -116,8 +119,14 @@ class FlagWord(object):
         self._value = initial
         self._schema = OrderedDict()
 
+        tot_bits = sum([item.nbits for item in schema])
+        if tot_bits > nbits:
+            raise TypeError("Too many fields for {nbits}-bit field (schema defines {tot} bits)".format(nbits=nbits, tot=tot_bits))
+
         bitn = 0
         for item in schema:
+            if not isinstance(item, FlagField):
+                raise TypeError('Schema must be composed of FlagField objects')
             if not issubclass(item.ftype, FlagBase):
                 raise TypeError('Expected FlagBase, got {}'.format(item.ftype))
             self._schema[item.name] = item.ftype(self, bitn, item.nbits, item.extra)
