@@ -12,6 +12,14 @@ class FlagBase(object):
     Handles the bitwise math so subclasses don't have to worry about it.
     """
 
+    __slots__ = [
+            'owner',
+            'offset',
+            'size',
+            'extra',
+            'mask',
+    ]
+
     def __init__(self, owner, offset, size, extra=None):
         if size < 1:
             raise TypeError('Flag must be at least 1 bit wide')
@@ -102,6 +110,12 @@ class FlagWord(object):
     Class to wrap an integer in bitwise flag/field accessors.
     """
 
+    __slots__ = [
+            '_nbits',
+            '_value',
+            '_schema',
+    ]
+
     def __init__(self, schema, nbits=32, initial=0):
         """
         :param schema:
@@ -142,8 +156,6 @@ class FlagWord(object):
         return rv+'>'
 
     def __getattr__(self, name):
-        if name[0] == '_':
-            return self.__dict__[name]
         try:
             v = self._schema[name]
         except KeyError:
@@ -151,9 +163,7 @@ class FlagWord(object):
         return v.get()
 
     def __setattr__(self, name, val):
-        if name[0] == '_':
-            self.__dict__[name] = val
-            return val
+        if name in self.__slots__: return object.__setattr__(self, name, val)
         try:
             v = self._schema[name]
         except KeyError:
