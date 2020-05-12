@@ -212,10 +212,9 @@ def read_bytes(stream, size):
 
 def write_bytes(stream, data):
     """
-    Read the given amount of raw bytes from a stream.
+    Write the given amount of raw bytes to a stream.
 
-    :param stream: the stream from which to read data
-    :param size: the size to read, in bytes
+    :param stream: the stream into which to write data
     :param data: the data to write
     """
     stream.write(data)
@@ -613,6 +612,7 @@ class Options(Mapping):
         - ``ipv6+prefix``: an ipv6 address followed by prefix length [17 bytes]
         - ``macaddr``: a mac address [6 bytes]
         - ``euiaddr``: a eui address [8 bytes]
+        - ``epb_flags``: 32-bit bitmask as per pcapng spec section 4.3.1
         - ``type+bytes``: field where the first byte is a type, and
           the remainder is bytes
         - ``opt_custom_str`` and ``opt_custom_bytes``: 4 bytes of Private
