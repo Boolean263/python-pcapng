@@ -266,6 +266,7 @@ class StructField(object):
     """Abstract base class for struct fields"""
 
     __metaclass__ = abc.ABCMeta
+    __slots__ = []
 
     @abc.abstractmethod
     def load(self, stream, endianness, seen=None):
@@ -287,6 +288,7 @@ class RawBytes(StructField):
 
     :param size: field size, in bytes
     """
+    __slots__ = [ 'size' ]
 
     def __init__(self, size):
         self.size = size  # in bytes!
@@ -310,6 +312,7 @@ class IntField(StructField):
     :param signed: whether the number is a signed or unsigned
         integer. Defaults to False (unsigned)
     """
+    __slots__ = [ 'size', 'signed' ]
 
     def __init__(self, size, signed=False):
         self.size = size  # in bits!
@@ -339,6 +342,7 @@ class OptionsField(StructField):
         Same as the ``schema`` parameter to :py:class:`Options` class
         constructor.
     """
+    __slots__ = [ 'options_schema' ]
 
     def __init__(self, options_schema):
         self.options_schema = options_schema
@@ -361,6 +365,7 @@ class PacketBytes(StructField):
     Field containing some "packet data", used in the Packet,
     EnhancedPacket, and SimplePacket blocks.
     """
+    __slots__ = [ 'dependency' ]
 
     def __init__(self, len_field):
         self.dependency = len_field
@@ -396,6 +401,7 @@ class ListField(StructField):
     :param subfield: a :py:class:`StructField` sub-class instance to be
         used to read values from the stream.
     """
+    __slots__ = [ 'subfield' ]
 
     def __init__(self, subfield):
         self.subfield = subfield
@@ -439,6 +445,7 @@ class NameResolutionRecordField(StructField):
     In both cases, the payload is composed of a valid address in the
     selected IP version, followed by null-separated/terminated domain names.
     """
+    __slots__ = []
 
     def load(self, stream, endianness, seen=None):
         record_type = read_int(stream, 16, False, endianness)
@@ -552,6 +559,7 @@ def write_options(stream, options):
 
 class EPBFlags(FlagWord):
     """Class representing the epb_flags option on an EPB"""
+    __slots__ = []
 
     def __init__(self, val=0):
         super(EPBFlags, self).__init__([
@@ -629,6 +637,12 @@ class Options(Mapping):
         The current endianness of the section these options came from.
         Required in order to load numeric fields.
     """
+    __slots__ = [
+            'schema',
+            '_field_names',
+            'data',
+            'endianness',
+    ]
 
     def __init__(self, schema, data, endianness):
         self.schema = {}  # Schema of option fields: {<code>: Option(...)}

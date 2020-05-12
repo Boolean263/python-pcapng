@@ -163,7 +163,10 @@ class FlagWord(object):
         return v.get()
 
     def __setattr__(self, name, val):
-        if name in self.__slots__: return object.__setattr__(self, name, val)
+        try:
+            return object.__setattr__(self, name, val)
+        except AttributeError:
+            pass
         try:
             v = self._schema[name]
         except KeyError:

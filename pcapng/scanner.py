@@ -28,6 +28,7 @@ class FileScanner(object):
         If you need to parse data from some string you have entirely in-memory,
         just wrap it in a :py:class:`io.BytesIO` object.
     """
+    __slots__ = [ 'stream', 'current_section', 'endianness' ]
 
     def __init__(self, stream):
         self.stream = stream

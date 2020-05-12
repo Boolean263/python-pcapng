@@ -33,6 +33,12 @@ class Block(object):
 
     schema = []
     readonly_fields = set()
+    __slots__ = [
+            # These are in addition to the above two properties
+            'magic_number',
+            '_raw',
+            '_decoded',
+    ]
 
     def __init__(self, **kwargs):
         if 'raw' in kwargs:
@@ -78,9 +84,9 @@ class Block(object):
             field.encode(getattr(self, name), outstream, endianness=self.section.endianness)
 
     def __getattr__(self, name):
+        # __getattr__ is only called when getting an attribute that
+        # this object doesn't have.
         try:
-            if not any([name == key for key, value, default in self.schema]):
-                return self.__dict__[name]
             if self._decoded is None:
                 self._decode()
             return self._decoded[name]
@@ -88,12 +94,16 @@ class Block(object):
             raise AttributeError(name)
 
     def __setattr__(self, name, value):
+        # __setattr__ is called for *any* attribute, real or not.
+        try:
+            # See it if it names an attribute we defined in our __slots__
+            return object.__setattr__(self, name, value)
+        except AttributeError:
+            # It's not an attribute, proceed with our nice interface to the schema
+            pass
         if name in self.readonly_fields:
-            raise exceptions.PcapngException("can't set read-only property '{prop}' on {cls}".format(prop=name, cls=self.__class__.__name__))
-        if not any([name == key for key, value, default in self.schema]):
-            self.__dict__[name] = value
-            return
-        if "_decoded" not in self.__dict__ or self.__dict__["_decoded"] is None:
+            raise AttributeError("'{cls}' object property '{prop}' is read-only".format(prop=name, cls=self.__class__.__name__))
+        if self._decoded is None:
             self._decoded = {}
             for key, packed_type, default in self.schema:
                 self._decoded[key] = None
@@ -114,6 +124,7 @@ class Block(object):
 
 class SectionMemberBlock(Block):
     """Block which must be a member of a section"""
+    __slots__ = [ 'section' ]
     def __init__(self, section, **kwargs):
         super(SectionMemberBlock, self).__init__(**kwargs)
         self.section = section
@@ -135,6 +146,12 @@ class SectionHeader(Block):
     unless otherwise noted.
     """
     magic_number = 0x0a0d0d0a
+    __slots__ = [
+            'endianness',
+            '_interfaces_id',
+            'interfaces',
+            'interface_stats',
+    ]
     schema = [
         ('version_major', IntField(16, False), 1),
         ('version_minor', IntField(16, False), 0),
@@ -213,6 +230,7 @@ class InterfaceDescription(SectionMemberBlock):
     unless otherwise noted.
     """
     magic_number = 0x00000001
+    __slots__ = []
     schema = [
         ('link_type', IntField(16, False), 0),  # todo: enc/decode
         ('reserved', IntField(16, False), 0),
@@ -272,6 +290,7 @@ class BlockWithTimestampMixin(object):
     Block mixin adding properties to better access timestamps
     of blocks that provide one.
     """
+    __slots__ = []
 
     @property
     def timestamp(self):
@@ -291,6 +310,7 @@ class BlockWithInterfaceMixin(object):
     Block mixin for blocks that have/require an interface.
     This includes all packet blocks as well as InterfaceStatistics.
     """
+    __slots__ = []
 
     @property
     def interface(self):
@@ -322,6 +342,7 @@ class BasePacketBlock(
     the current length of the packet data.
     """
 
+    __slots__ = []
     readonly_fields = set(('captured_len',))
 
     @property
@@ -347,6 +368,7 @@ class EnhancedPacket(BasePacketBlock, BlockWithTimestampMixin):
     unless otherwise noted.
     """
     magic_number = 0x00000006
+    __slots__ = []
     schema = [
         ('interface_id', IntField(32, False), 0),
         ('timestamp_high', IntField(32, False), 0),
@@ -371,6 +393,7 @@ class SimplePacket(BasePacketBlock):
     unless otherwise noted.
     """
     magic_number = 0x00000003
+    __slots__ = []
     schema = [
         ('packet_len', IntField(32, False), 0), # NOT the captured length
         ('packet_data', PacketBytes('captured_len'), b''), # we don't actually use this
@@ -448,6 +471,7 @@ class ObsoletePacket(BasePacketBlock, BlockWithTimestampMixin):
     unless otherwise noted.
     """
     magic_number = 0x00000002
+    __slots__ = []
     schema = [
         ('interface_id', IntField(16, False), 0),
         ('drops_count', IntField(16, False), 0),
@@ -500,6 +524,7 @@ class NameResolution(SectionMemberBlock):
     unless otherwise noted.
     """
     magic_number = 0x00000004
+    __slots__ = []
     schema = [
         ('records', ListField(NameResolutionRecordField()), []),
         ('options', OptionsField([
@@ -521,6 +546,7 @@ class InterfaceStatistics(SectionMemberBlock, BlockWithTimestampMixin,
     unless otherwise noted.
     """
     magic_number = 0x00000005
+    __slots__ = []
     schema = [
         ('interface_id', IntField(32, False), 0),
         ('timestamp_high', IntField(32, False), 0),
@@ -544,6 +570,7 @@ class UnknownBlock(Block):
     Its block type and raw data will be stored directly with no further
     processing.
     """
+    __slots__ = [ 'block_type', 'data' ]
 
     def __init__(self, block_type, data):
         self.block_type = block_type
