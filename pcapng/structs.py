@@ -294,7 +294,7 @@ class RawBytes(StructField):
     def load(self, stream, endianness, seen=None):
         return read_bytes_padded(stream, self.size)
 
-    def encode(self, value, stream, endianness):
+    def encode(self, value, stream, endianness=None):
         write_bytes_padded(stream, value)
 
     def __repr__(self):

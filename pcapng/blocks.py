@@ -329,11 +329,13 @@ class BasePacketBlock(
         return len(self.packet_data)
 
     # Helper function. If the user hasn't explicitly set an original packet
-    # length, use the length of the captured packet data.
+    # length, use the length of the captured packet data. And if they *have*
+    # set a length but it's smaller than the captured data, make it the same as
+    # the captured data length.
     @property
     def packet_len(self):
-        plen = self.__getattr__('packet_len') # this call prevents recursion
-        return plen or len(self.packet_data)
+        plen = self.__getattr__('packet_len') or 0 # this call prevents recursion
+        return max(plen, len(self.packet_data))
 
 
 @register_block
@@ -408,7 +410,9 @@ class SimplePacket(BasePacketBlock):
         else:
             return min(snap_len, self.packet_len)
 
-    def write(self, outstream):
+    def _encode(self, outstream):
+        fld_size = IntField(32, False)
+        fld_data = RawBytes(0)
         if len(self.section.interfaces) > 1:
             # Spec is a bit ambiguous here. Section 4.4 says "it MUST
             # be assumed that all the Simple Packet Blocks have been captured
@@ -422,7 +426,17 @@ class SimplePacket(BasePacketBlock):
             if strictness.should_fix():
                 # Can't fix this. The IDBs have already been written.
                 pass
-        super(SimplePacket, self).write(outstream)
+        snap_len = self.interface.snaplen
+        if snap_len > 0 and snap_len < self.captured_len:
+            # This isn't a strictness issue, it *will* break other readers
+            # if we write more bytes than the snaplen says to expect.
+            fld_size.encode(self.packet_len,
+                    outstream, endianness=self.section.endianness)
+            fld_data.encode(self.packet_data[:snap_len], outstream)
+        else:
+            fld_size.encode(self.packet_len,
+                    outstream, endianness=self.section.endianness)
+            fld_data.encode(self.packet_data, outstream)
 
 
 @register_block
