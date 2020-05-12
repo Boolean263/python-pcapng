@@ -175,10 +175,6 @@ Current status on that front:
 
 * Able to add options to a block (new or existing) and write them out
 
-  - Adding strings is reasonably well tested so far
-
-  - Other options and option types need more testing
-
 * Write support for NRBs
 
   - NRB records return/accept a list of names as per the pcapng spec,
@@ -202,7 +198,12 @@ Current status on that front:
 
     * Writing a PB (PBs are obsolete and not to be used in new files)
 
-* API tweaks so creating blocks programmatically is nicer (still in progress)
+    * Writing EPB/SPB/PB/ISB before writing any IDBs
+
+* API tweaks so creating blocks programmatically is nicer
+
+  - packet data is accessed as raw bytes, not a tuple with size fields that
+    can get out of sync
 
   - specifying payload data to a packet and having it automatically
     update the ``captured_len`` property
